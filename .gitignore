@@ -1,0 +1,5 @@
+# Fichiers de configuration CLASP à ignorer
+.clasp.json
+
+# Dépendances Node.js (si vous utilisez des packages)
+node_modules/
