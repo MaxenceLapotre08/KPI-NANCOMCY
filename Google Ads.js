@@ -295,15 +295,15 @@ const LOGIN_CUSTOMER_ID = '7343744510';
 const GADS_MONTHS_BACK = 24;
 
 // OAuth client (même que GBM si tu réutilises le projet)
-const CLIENT_ID = scriptProperties.getProperty('CLIENT_ID');
-const CLIENT_SECRET = scriptProperties.getProperty('CLIENT_SECRET');
+const CLIENT_ID = PropertiesService.getScriptProperties().getProperty('CLIENT_ID');
+const CLIENT_SECRET = PropertiesService.getScriptProperties().getProperty('CLIENT_SECRET');
 
 // AUTH
 function getGoogleAdsAccessToken_() {
   const tokenUrl = 'https://oauth2.googleapis.com/token';
   const payload = {
-    client_id: OAUTH_CLIENT_ID,
-    client_secret: OAUTH_CLIENT_SECRET,
+    client_id: CLIENT_ID,
+    client_secret: CLIENT_SECRET,
     refresh_token: getProp_('REFRESH_TOKEN'),
     grant_type: 'refresh_token'
   };
@@ -821,7 +821,7 @@ function run_MagnetisToAds_AddLastMonth() {
     if (isYearSeparatorRow_(val)) continue;
     const ym = sheetCellToYYYYMM_(val);
     if (ym === monthKey) {
-      sh.getRange(r, CALLS_COL).setValue(n);
+      setPreserveFormula_(sh, r, FORMS_COL, n);
       break;
     }
   }
@@ -1258,8 +1258,8 @@ function run_MondayLeadsToAds_SyncForSheet(){
     if (isYearSeparatorRow_(cell)) continue;
     const ym = sheetCellToYYYYMM_(cell);
     if (!ym) continue; // ← ne rien écrire hors lignes mois
-    sh.getRange(r, CALLS_LEAD_COL).setValue(callsByMonth[ym] || 0);
-    sh.getRange(r, FORMS_LEAD_COL).setValue(formsByMonth[ym] || 0);
+    setPreserveFormula_(sh, r, CALLS_LEAD_COL, callsByMonth[ym] || 0);
+    setPreserveFormula_(sh, r, FORMS_LEAD_COL, formsByMonth[ym] || 0);
   }
 }
 
@@ -1293,8 +1293,8 @@ function run_MondayLeadsToAds_AddLastMonth(){
     if (isYearSeparatorRow_(val)) continue;
     const ym = sheetCellToYYYYMM_(val);
     if (ym === ymKey){
-      sh.getRange(r, CALLS_LEAD_COL).setValue(nCalls);
-      sh.getRange(r, FORMS_LEAD_COL).setValue(nForms);
+      setPreserveFormula_(sh, r, CALLS_LEAD_COL, nCalls);
+      setPreserveFormula_(sh, r, FORMS_LEAD_COL, nForms);
       break;
     }
   }
@@ -1328,8 +1328,8 @@ function run_MondayLeadsToAds_CurrentMonth(){
     if (isYearSeparatorRow_(val)) continue;
     const ym = sheetCellToYYYYMM_(val);
     if (ym === ymKey){
-      sh.getRange(r, CALLS_LEAD_COL).setValue(nCalls);
-      sh.getRange(r, FORMS_LEAD_COL).setValue(nForms);
+      setPreserveFormula_(sh, r, CALLS_LEAD_COL, nCalls);
+      setPreserveFormula_(sh, r, FORMS_LEAD_COL, nForms);
       break;
     }
   }
@@ -1381,7 +1381,7 @@ function run_FormsToAds_SyncForSheet() {
     if (isYearSeparatorRow_(cell)) continue;
     const ym = sheetCellToYYYYMM_(cell);
     if (!ym) continue;
-    sh.getRange(r, FORMS_COL).setValue(totalCounts[ym] || 0);
+    setPreserveFormula_(sh, r, FORMS_COL, totalCounts[ym] || 0);
   }
 }
 
@@ -1463,7 +1463,7 @@ function run_FormsToAds_CurrentMonth() {
     if (isYearSeparatorRow_(val)) continue;
     const ym = sheetCellToYYYYMM_(val);
     if (ym === monthKey) {
-      sh.getRange(r, FORMS_COL).setValue(n);
+      setPreserveFormula_(sh, r, FORMS_COL, n);
       break;
     }
   }
@@ -1709,5 +1709,3 @@ function run_GAds_CurrentMonth() {
 
   Logger.log(`[GAds CurrentMonth] ${ymKey} -> cost=${v.cost}, imp=${v.impressions}, clk=${v.clicks}, ctr=${v.ctr}, cpc=${v.cpc}`);
 }
-
-

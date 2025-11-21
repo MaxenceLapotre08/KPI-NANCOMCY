@@ -74,6 +74,18 @@ function _gbmStyleYearRow_(sh, row, moisCol) {
   sh.getRange(row, moisCol).setFontWeight('bold');
 }
 
+function setPreserveFormula_(sh, row, col, value, numberFormat) {
+  if (!col) return;
+  const cell = sh.getRange(row, col);
+  const formula = cell.getFormula();
+  if (formula) {
+    Logger.log(`[GMB SKIP] Préserve formule en ${cell.getA1Notation()} -> ${formula}`);
+    return;
+  }
+  cell.setValue(value);
+  if (numberFormat) cell.setNumberFormat(numberFormat);
+}
+
 /* ---------- OAuth ---------- */
 function getService() {
   return OAuth2.createService('GBP')
@@ -367,41 +379,27 @@ function writeGBMRowAt_(sh, rowIndex, monthKey, metrics, reviewsAgg) {
   const tauxInteraction = vues ? ( (clics + appels + itin) / vues ) : 0;
   const tauxAppel       = vues ? ( appels / vues ) : 0;
 
-  const setIf = (col, val) => { if (col) sh.getRange(rowIndex, col).setValue(val); };
-
-  setIf(moisCol, monthKey);
-  setIf(vuesCol, vues);
-  setIf(clicsCol, clics);
-  setIf(itinCol, itin);
-  setIf(appelsCol, appels);
+  setPreserveFormula_(sh, rowIndex, moisCol, monthKey);
+  setPreserveFormula_(sh, rowIndex, vuesCol, vues);
+  setPreserveFormula_(sh, rowIndex, clicsCol, clics);
+  setPreserveFormula_(sh, rowIndex, itinCol, itin);
+  setPreserveFormula_(sh, rowIndex, appelsCol, appels);
 
   // Avis (par mois) si reviewsAgg fourni
   if (reviewsAgg && (avisNbCol || avisScoreCol)) {
     const r = reviewsAgg[monthKey];
     if (r) {
-      if (avisNbCol)    sh.getRange(rowIndex, avisNbCol).setValue(r.count);
-      if (avisScoreCol) {
-        sh.getRange(rowIndex, avisScoreCol).setValue(r.avg);
-        sh.getRange(rowIndex, avisScoreCol).setNumberFormat('0.00');
-      }
-    } else {
-      // pas d'avis ce mois-là → on laisse vide
+      setPreserveFormula_(sh, rowIndex, avisNbCol, r.count);
+      setPreserveFormula_(sh, rowIndex, avisScoreCol, r.avg, '0.00');
     }
   }
 
-  setIf(mapsMobCol, metrics['BUSINESS_IMPRESSIONS_MOBILE_MAPS']||0);
-  setIf(mapsDeskCol, metrics['BUSINESS_IMPRESSIONS_DESKTOP_MAPS']||0);
-  setIf(srchMobCol, metrics['BUSINESS_IMPRESSIONS_MOBILE_SEARCH']||0);
-  setIf(srchDeskCol, metrics['BUSINESS_IMPRESSIONS_DESKTOP_SEARCH']||0);
-
-  if (tauxIntCol) {
-    sh.getRange(rowIndex, tauxIntCol).setValue(tauxInteraction);
-    sh.getRange(rowIndex, tauxIntCol).setNumberFormat('0.00%');
-  }
-  if (tauxAppelCol) {
-    sh.getRange(rowIndex, tauxAppelCol).setValue(tauxAppel);
-    sh.getRange(rowIndex, tauxAppelCol).setNumberFormat('0.00%');
-  }
+  setPreserveFormula_(sh, rowIndex, mapsMobCol, metrics['BUSINESS_IMPRESSIONS_MOBILE_MAPS']||0);
+  setPreserveFormula_(sh, rowIndex, mapsDeskCol, metrics['BUSINESS_IMPRESSIONS_DESKTOP_MAPS']||0);
+  setPreserveFormula_(sh, rowIndex, srchMobCol, metrics['BUSINESS_IMPRESSIONS_MOBILE_SEARCH']||0);
+  setPreserveFormula_(sh, rowIndex, srchDeskCol, metrics['BUSINESS_IMPRESSIONS_DESKTOP_SEARCH']||0);
+  setPreserveFormula_(sh, rowIndex, tauxIntCol, tauxInteraction, '0.00%');
+  setPreserveFormula_(sh, rowIndex, tauxAppelCol, tauxAppel, '0.00%');
 }
 
 /* ---------- JOBS ---------- */

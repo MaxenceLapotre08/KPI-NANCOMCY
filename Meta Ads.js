@@ -824,33 +824,16 @@ function META_writeMonth_(sh, cols, ymKey, v){
   );
 
   // 🔹 Sources directes (avec protection des formules)
- // Sources directes (autorisées)
-if (cols.budget && v.spend != null && !META_isProtectedHeader_(sh, cols.budget))
-  sh.getRange(row, cols.budget).setValue(v.spend).setNumberFormat('0.00');
-
-if (cols.impr && v.impressions != null && !META_isProtectedHeader_(sh, cols.impr))
-  sh.getRange(row, cols.impr).setValue(v.impressions);
-
-if (cols.clicks && v.clicks != null && !META_isProtectedHeader_(sh, cols.clicks))
-  sh.getRange(row, cols.clicks).setValue(v.clicks);
-
-if (cols.interN && v.interactions != null && !META_isProtectedHeader_(sh, cols.interN))
-  sh.getRange(row, cols.interN).setValue(v.interactions);
-
-if (cols.appels && v.calls != null && !META_isProtectedHeader_(sh, cols.appels))
-  sh.getRange(row, cols.appels).setValue(v.calls);
-
-if (cols.forms && v.forms != null && !META_isProtectedHeader_(sh, cols.forms))
-  sh.getRange(row, cols.forms).setValue(v.forms);
-
-if (cols.callsLead && v.callsLead != null && !META_isProtectedHeader_(sh, cols.callsLead))
-  sh.getRange(row, cols.callsLead).setValue(v.callsLead);
-
-if (cols.formsLead && v.formsLead != null && !META_isProtectedHeader_(sh, cols.formsLead))
-  sh.getRange(row, cols.formsLead).setValue(v.formsLead);
-
-if (cols.dur && v.avgSec != null && !META_isProtectedHeader_(sh, cols.dur))
-  META_setSecondsAsDuration_(sh, row, cols.dur, v.avgSec);
+  // Sources directes (autorisées) - setPreserveFormula_ évite d'écraser les formules
+  if (cols.budget && v.spend != null) setPreserveFormula_(sh, row, cols.budget, v.spend, '0.00 €');
+  if (cols.impr && v.impressions != null) setPreserveFormula_(sh, row, cols.impr, v.impressions);
+  if (cols.clicks && v.clicks != null) setPreserveFormula_(sh, row, cols.clicks, v.clicks);
+  if (cols.interN && v.interactions != null) setPreserveFormula_(sh, row, cols.interN, v.interactions);
+  if (cols.appels && v.calls != null) setPreserveFormula_(sh, row, cols.appels, v.calls);
+  if (cols.forms && v.forms != null) setPreserveFormula_(sh, row, cols.forms, v.forms);
+  if (cols.callsLead && v.callsLead != null) setPreserveFormula_(sh, row, cols.callsLead, v.callsLead);
+  if (cols.formsLead && v.formsLead != null) setPreserveFormula_(sh, row, cols.formsLead, v.formsLead);
+  if (cols.dur && v.avgSec != null) META_setSecondsAsDuration_(sh, row, cols.dur, v.avgSec);
 
 
   // 🔹 Dérivés autorisés : CTR / Taux d’interaction / Taux de conversion

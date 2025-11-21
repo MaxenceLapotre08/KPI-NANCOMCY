@@ -597,11 +597,15 @@ function SITE_mondayLeadCallsCountsByMonth_(boardId, colSource, colType, fromUTC
 
       if (!(when >= fromUTC && when <= toUTC)) return;
 
-      // Source : ÉGALITÉ stricte à une des valeurs autorisées (pas de "includes")
-      if (!SITE_textEqualsAny_(srcText, SITE_MONDAY_LEADS_SOURCE_MATCH)) return;
+      // Source : ÉGALITÉ stricte à une des valeurs autorisées
+      const sourceMatch = SITE_textEqualsAny_(srcText, SITE_MONDAY_LEADS_SOURCE_MATCH);
+      // Type : doit contenir "appel"
+      const typeMatch = SITE_textIncludesAny_(typText, SITE_MONDAY_LEADS_TYPE_MATCH);
 
-      // Type : doit contenir "appel" (on garde la souplesse "includes")
-      if (!SITE_textIncludesAny_(typText, SITE_MONDAY_LEADS_TYPE_MATCH)) return;
+      if (sourceMatch && typeMatch) {
+        const key = when.getUTCFullYear()+'-'+String(when.getUTCMonth()+1).padStart(2,'0');
+        counts[key] = (counts[key]||0) + 1;
+      }
     });
 
     cursor = page.cursor;
@@ -793,7 +797,7 @@ function SITE_isProtectedHeader_(sh, col) {
 
   // 🟢 Colonnes autorisées même si elles contiennent "contact", "lead", etc.
   // -> on VEUT que le script les remplisse
-  if (/(taux de conversion contact|taux de conversion lead|ctr|taux de clics|taux de clic)/.test(h)) {
+  if (/(taux de conversion contact|taux de conversion lead)/.test(h)) {
     return false;
   }
 
