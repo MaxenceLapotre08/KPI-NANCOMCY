@@ -1,80 +1,52 @@
 /**************************** ORCHESTRATION ****************************/
 // Fenêtre Full History forcée : depuis 1er janvier 2024 inclus
 const FULLHIST_START_LOCAL = new Date(2024, 0, 1);                    // pour APIs en local time
-const FULLHIST_START_UTC   = new Date(Date.UTC(2024, 0, 1, 0,0,0));   // pour APIs en UTC
+const FULLHIST_START_UTC = new Date(Date.UTC(2024, 0, 1, 0, 0, 0));   // pour APIs en UTC
 
 /**************************** FLAGS ****************************/
 let ADS_ENABLE_MATOMO = true;  // mettre false pour couper Matomo dans les runners globaux
-let ADS_ENABLE_LEADS  = true;  // mettre false pour couper Monday Leads (appels/formulaires lead)
+let ADS_ENABLE_LEADS = true;  // mettre false pour couper Monday Leads (appels/formulaires lead)
 
-// Petit toast dans l'UI de Sheets (garde une seule définition si déjà présente)
-function toast_(msg, title, seconds) {
-  try { SpreadsheetApp.getActive().toast(msg, title || 'Sync', seconds || 5); } catch(e) {}
-}
-
-// Retry avec backoff (2s, 4s, 8s)
-function executeWithRetry_(fn, label, maxRetries) {
-  label = label || 'task';
-  maxRetries = maxRetries || 3;
-  let attempt = 0, lastErr;
-  while (attempt < maxRetries) {
-    try {
-      attempt++;
-      Logger.log(`[RUN] ${label} (try ${attempt}/${maxRetries})`);
-      const t0 = Date.now();
-      const out = fn();
-      Logger.log(`[OK ] ${label} in ${((Date.now()-t0)/1000).toFixed(1)}s`);
-      return out;
-    } catch (err) {
-      lastErr = err;
-      const msg = String(err && err.message || err);
-      Logger.log(`[ERR] ${label}: ${msg}`);
-      const isRetryable = /(^|\s)(429|5\d\d|RATE_LIMIT|RESOURCE_EXHAUSTED)/i.test(msg);
-      if (attempt >= maxRetries || !isRetryable) break;
-      Utilities.sleep(Math.pow(2, attempt) * 1000); // 2s, 4s, 8s
-    }
-  }
-  throw lastErr;
-}
+// Les fonctions Utils_toast et Utils_executeWithRetry sont maintenant dans Utils.js
 
 // FULL HISTORY : Google Ads + (Forms Paperform+Monday) + Magnetis + Matomo
 function run_All_FullHistory() {
   const lock = LockService.getScriptLock();
   lock.waitLock(30 * 1000);
   try {
-    toast_('Full history : démarrage…', 'Sync ALL', 5);
+    Utils_toast('Full history : démarrage…', 'Sync ALL', 5);
 
     // 1) Google Ads (réécrit l’onglet/mois, insère les séparateurs d’années si besoin)
-    executeWithRetry_(() => run_GAds_FullHistory(), 'Google Ads FullHistory');
+    Utils_executeWithRetry(() => run_GAds_FullHistory(), 'Google Ads FullHistory');
     Utilities.sleep(400);
 
     // 2) Formulaires unifiés (Paperform + Monday)
-    executeWithRetry_(() => run_FormsToAds_SyncForSheet(), 'Forms (Paperform+Monday) Sync');
+    Utils_executeWithRetry(() => run_FormsToAds_SyncForSheet(), 'Forms (Paperform+Monday) Sync');
     Utilities.sleep(250);
 
     // 3) Magnetis (appels)
-    executeWithRetry_(() => run_MagnetisToAds_SyncForSheet(), 'Magnetis Sync');
+    Utils_executeWithRetry(() => run_MagnetisToAds_SyncForSheet(), 'Magnetis Sync');
     Utilities.sleep(250);
 
     // 3bis) Monday Leads (appels lead + formulaires lead)
     if (ADS_ENABLE_LEADS) {
-      executeWithRetry_(() => run_MondayLeadsToAds_SyncForSheet(), 'Monday Leads (Ads) Sync');
+      Utils_executeWithRetry(() => run_MondayLeadsToAds_SyncForSheet(), 'Monday Leads (Ads) Sync');
       Utilities.sleep(200);
 
       // N-1 Monday Leads (utile si tu veux forcer la dernière ligne)
-      executeWithRetry_(() => run_MondayLeadsToAds_AddLastMonth(), 'Monday Leads (Ads) N-1');
+      Utils_executeWithRetry(() => run_MondayLeadsToAds_AddLastMonth(), 'Monday Leads (Ads) N-1');
       Utilities.sleep(150);
     }
 
     // 4) Recalcule uniquement CTR/Taux de conversion (après clics/appels/formulaires)
-    executeWithRetry_(() => run_Ads_Derived_RecomputeAll(), 'Ads Derived (CTR/CR)');
+    Utils_executeWithRetry(() => run_Ads_Derived_RecomputeAll(), 'Ads Derived (CTR/CR)');
 
     // 5) Matomo (durée moyenne)
     if (ADS_ENABLE_MATOMO) {
-      executeWithRetry_(() => run_MatomoToAds_SyncForSheet(), 'Matomo Sync');
+      Utils_executeWithRetry(() => run_MatomoToAds_SyncForSheet(), 'Matomo Sync');
     }
 
-    toast_('Full history : terminé ✅', 'Sync ALL', 5);
+    Utils_toast('Full history : terminé ✅', 'Sync ALL', 5);
   } finally {
     lock.releaseLock();
   }
@@ -85,36 +57,36 @@ function Ads_run_All_AddLastMonth() {
   const lock = LockService.getScriptLock();
   lock.waitLock(30 * 1000);
   try {
-    toast_('Last month : démarrage…', 'Sync ALL', 5);
+    Utils_toast('Last month : démarrage…', 'Sync ALL', 5);
 
     // 1) Google Ads N-1
-    executeWithRetry_(() => run_GAds_AddLastMonth(), 'Google Ads AddLastMonth');
+    Utils_executeWithRetry(() => run_GAds_AddLastMonth(), 'Google Ads AddLastMonth');
     Utilities.sleep(300);
 
     // 2) Formulaires (Paperform + Monday) N-1
-    executeWithRetry_(() => run_FormsToAds_AddLastMonth(), 'Forms AddLastMonth');
+    Utils_executeWithRetry(() => run_FormsToAds_AddLastMonth(), 'Forms AddLastMonth');
     Utilities.sleep(200);
 
     // 3) Magnetis N-1
-    executeWithRetry_(() => run_MagnetisToAds_AddLastMonth(), 'Magnetis AddLastMonth');
+    Utils_executeWithRetry(() => run_MagnetisToAds_AddLastMonth(), 'Magnetis AddLastMonth');
     Utilities.sleep(200);
 
-        // 3bis) Monday Leads N-1 (appels lead + formulaires lead)
+    // 3bis) Monday Leads N-1 (appels lead + formulaires lead)
     if (ADS_ENABLE_LEADS) {
-      executeWithRetry_(() => run_MondayLeadsToAds_AddLastMonth(), 'Monday Leads (Ads) N-1');
+      Utils_executeWithRetry(() => run_MondayLeadsToAds_AddLastMonth(), 'Monday Leads (Ads) N-1');
       Utilities.sleep(150);
     }
 
     // 4) Recalcule CTR/CR pour N-1 (après formulaires + appels)
-    executeWithRetry_(() => run_Ads_Derived_RecomputeLastMonth(), 'Ads Derived N-1');
+    Utils_executeWithRetry(() => run_Ads_Derived_RecomputeLastMonth(), 'Ads Derived N-1');
 
     // 5) Matomo N-1
     if (ADS_ENABLE_MATOMO) {
-      executeWithRetry_(() => run_MatomoToAds_AddLastMonth(), 'Matomo AddLastMonth');
+      Utils_executeWithRetry(() => run_MatomoToAds_AddLastMonth(), 'Matomo AddLastMonth');
     }
 
 
-    toast_('Last month : terminé ✅', 'Sync ALL', 5);
+    Utils_toast('Last month : terminé ✅', 'Sync ALL', 5);
   } finally {
     lock.releaseLock();
   }
@@ -123,35 +95,35 @@ function Ads_run_All_CurrentMonth() {
   const lock = LockService.getScriptLock();
   lock.waitLock(30 * 1000);
   try {
-    toast_('Mois en cours : démarrage…', 'Sync ALL', 5);
+    Utils_toast('Mois en cours : démarrage…', 'Sync ALL', 5);
 
     // 1) Google Ads mois en cours
-    executeWithRetry_(() => run_GAds_CurrentMonth(), 'Google Ads CurrentMonth');
+    Utils_executeWithRetry(() => run_GAds_CurrentMonth(), 'Google Ads CurrentMonth');
     Utilities.sleep(300);
 
     // 2) Formulaires (Paperform + Monday) mois en cours
-    executeWithRetry_(() => run_FormsToAds_CurrentMonth(), 'Forms CurrentMonth');
+    Utils_executeWithRetry(() => run_FormsToAds_CurrentMonth(), 'Forms CurrentMonth');
     Utilities.sleep(200);
 
     // 3) Magnetis mois en cours
-    executeWithRetry_(() => run_MagnetisToAds_CurrentMonth(), 'Magnetis CurrentMonth');
+    Utils_executeWithRetry(() => run_MagnetisToAds_CurrentMonth(), 'Magnetis CurrentMonth');
     Utilities.sleep(200);
 
     // 3bis) Monday Leads mois en cours (appels lead + formulaires lead)
     if (ADS_ENABLE_LEADS) {
-      executeWithRetry_(() => run_MondayLeadsToAds_CurrentMonth(), 'Monday Leads (Ads) CurrentMonth');
+      Utils_executeWithRetry(() => run_MondayLeadsToAds_CurrentMonth(), 'Monday Leads (Ads) CurrentMonth');
       Utilities.sleep(150);
     }
 
     // 4) Recalcule CTR/CR pour le mois en cours
-    executeWithRetry_(() => run_Ads_Derived_RecomputeCurrentMonth(), 'Ads Derived CurrentMonth');
+    Utils_executeWithRetry(() => run_Ads_Derived_RecomputeCurrentMonth(), 'Ads Derived CurrentMonth');
 
     // 5) Matomo mois en cours
     if (ADS_ENABLE_MATOMO) {
-      executeWithRetry_(() => run_MatomoToAds_CurrentMonth(), 'Matomo CurrentMonth');
+      Utils_executeWithRetry(() => run_MatomoToAds_CurrentMonth(), 'Matomo CurrentMonth');
     }
 
-    toast_('Mois en cours : terminé ✅', 'Sync ALL', 5);
+    Utils_toast('Mois en cours : terminé ✅', 'Sync ALL', 5);
   } finally {
     lock.releaseLock();
   }
@@ -163,114 +135,22 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('Update Google Ads')
     .addItem('▶ Tout (Full history)', 'run_All_FullHistory')
-    .addItem('▶ Dernier mois',        'Ads_run_All_AddLastMonth')
+    .addItem('▶ Dernier mois', 'Ads_run_All_AddLastMonth')
     .addToUi();
 }
 
-/**************************** HELPERS GÉNÉRAUX ****************************/
-
-// Détecte une ligne "année" (ex: 2024 / 2025)
-function isYearSeparatorRow_(cell) {
-  if (cell == null) return false;
-  if (Object.prototype.toString.call(cell) === '[object Date]' && !isNaN(cell.getTime())) return false;
-  const s = String(cell).trim();
-  if (/^\d{4}$/.test(s)) {
-    const y = +s;
-    return y >= 1900 && y <= 2100;
-  }
-  if (typeof cell === 'number' && isFinite(cell)) {
-    const y = Math.round(cell);
-    return y >= 1900 && y <= 2100;
-  }
-  return false;
-}
-
-// Convertit la valeur de la cellule (A: "mois") -> "YYYY-MM" (gère "août 2025", etc.)
-function sheetCellToYYYYMM_(cell) {
-  // Date Sheets ?
-  if (Object.prototype.toString.call(cell) === '[object Date]' && !isNaN(cell.getTime())) {
-    const y = cell.getFullYear(), m = cell.getMonth()+1;
-    return `${y}-${String(m).padStart(2,'0')}`;
-  }
-  const raw = String(cell || '').trim();
-  if (!raw) return null;
-
-  // Formats numériques
-  let m;
-  if ((m = raw.match(/^(\d{4})-(\d{1,2})$/)))   return `${m[1]}-${String(+m[2]).padStart(2,'0')}`;
-  if ((m = raw.match(/^(\d{4})\/(\d{1,2})$/)))  return `${m[1]}-${String(+m[2]).padStart(2,'0')}`;
-  if ((m = raw.match(/^(\d{4})(\d{2})$/)))      return `${m[1]}-${m[2]}`;
-  if ((m = raw.match(/^(\d{4})-(\d{2})-\d{2}$/))) return `${m[1]}-${m[2]}`;
-
-  // Mois FR
-  const norm = raw.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-  const FR = {
-    'janvier':1,'fevrier':2,'mars':3,'avril':4,'mai':5,'juin':6,
-    'juillet':7,'aout':8,'septembre':9,'octobre':10,'novembre':11,'decembre':12
-  };
-  const mm = norm.match(/(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre)\s+(\d{4})/);
-  if (mm) {
-    const mo = FR[mm[1]], y = +mm[2];
-    return `${y}-${String(mo).padStart(2,'0')}`;
-  }
-  return null;
-}
-
-
-// Affiche correctement des "secondes" en durée [h]:mm:ss dans Sheets
-function setSecondsAsDuration_(sh, row, col, secs) {
-  const days = (typeof secs === 'number' && !isNaN(secs)) ? secs / 86400 : 0;
-  setPreserveFormula_(sh, row, col, days, '[h]:mm:ss');
-}
-
-// Écrit une valeur uniquement si la cellule NE contient PAS de formule
-function setPreserveFormula_(sh, row, col, value, numberFormat) {
-  if (!col || !sh) return;
-  const cell = sh.getRange(row, col);
-  const formula = cell.getFormula();
-  if (formula) {
-    // On ne log que si la formule est non vide pour éviter le bruit
-    if (formula.trim()) {
-      Logger.log(`[SKIP] Préserve formule en ${cell.getA1Notation()} -> ${formula}`);
-    }
-    return;
-  }
-  // LOG DÉTAILLÉ : On écrit car aucune formule n'a été trouvée.
-  const sheetName = sh.getName();
-  const a1 = cell.getA1Notation();
-  Logger.log(`[WRITE] ${sheetName} | ${a1} | Aucune formule détectée. Écriture de la valeur: "${value}"`);
-  cell.setValue(value);
-  if (numberFormat) cell.setNumberFormat(numberFormat);
-}
-
-// Normalisation & repérage d’en-têtes
-const HEADERS_ROW_ADS = 3;     // ligne d'en-têtes pour l’onglet "Google Ads"
-function _normHeader_(s){
-  return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .replace(/[’'`]/g,'').replace(/\s+/g,' ').trim();
-}
-function findColByHeaderAliases_(sheet, aliases, headerRow){
-  headerRow = headerRow || HEADERS_ROW_ADS || 3;
-  const headers = sheet.getRange(headerRow, 1, 1, sheet.getLastColumn()).getValues()[0]||[];
-  const HN = headers.map(_normHeader_);
-  const wanted = aliases.map(_normHeader_);
-  for (let i=0;i<HN.length;i++){
-    const h = HN[i]; if (!h) continue;
-    if (wanted.some(w=>h===w || h.includes(w))) return i+1;
-  }
-  return 0;
-}
-
-// ➜ Crée la colonne si manquante (en-tête ligne HEADERS_ROW_ADS)
-function ensureColByHeader_(sheet, wantedHeader) {
-  const col = findColByHeaderAliases_(sheet, [wantedHeader], HEADERS_ROW_ADS);
-  if (col) return col;
-  const lastCol = sheet.getLastColumn();
-  sheet.insertColumnAfter(lastCol);
-  const newCol = lastCol + 1;
-  sheet.getRange(HEADERS_ROW_ADS, newCol).setValue(wantedHeader);
-  return newCol;
-}
+/**************************** HELPERS GÉNÉRAUX (Utilise Utils.js) ****************************/
+// Les fonctions suivantes sont maintenant dans Utils.js :
+// Utils_toast -> Utils_toast
+// Utils_executeWithRetry -> Utils_executeWithRetry
+// Utils_isYearSeparatorRow -> Utils_isYearSeparatorRow
+// Utils_sheetCellToYYYYMM -> Utils_sheetCellToYYYYMM
+// Utils_setSecondsAsDuration -> Utils_setSecondsAsDuration
+// Utils_setPreserveFormula -> Utils_setPreserveFormula
+// Utils_normHeader -> Utils_normHeader
+// Utils_findColByHeaderAliases -> Utils_findColByHeaderAliases
+// Utils_ensureColByHeader -> Utils_ensureColByHeader
+// Utils_monthKeyToFr -> Utils_monthKeyToFr
 
 // Propriétés de script
 function getProp_(key) {
@@ -353,14 +233,14 @@ function aggregateAdsByMonth_(data) {
 
       const met = r.metrics || {};
       const costMicros = (met.costMicros != null ? met.costMicros :
-                         (met.cost_micros != null ? met.cost_micros : 0));
+        (met.cost_micros != null ? met.cost_micros : 0));
       const impressions = Number(met.impressions || 0);
-      const clicks      = Number(met.clicks || 0);
+      const clicks = Number(met.clicks || 0);
 
       if (!byMonth[key]) byMonth[key] = { impressions: 0, clicks: 0, cost: 0, calls: 0 };
       byMonth[key].impressions += impressions;
-      byMonth[key].clicks      += clicks;
-      byMonth[key].cost        += Number(costMicros) / 1e6; // micros -> devise
+      byMonth[key].clicks += clicks;
+      byMonth[key].cost += Number(costMicros) / 1e6; // micros -> devise
       const calls = Number(met.phoneCalls || met.calls || 0);
       if (calls) byMonth[key].calls += calls;
     });
@@ -374,10 +254,10 @@ function aggregateAdsByMonth_(data) {
 }
 
 // "YYYY-MM" -> "mois yyyy" FR
-function monthKeyToFr_(ym) {
-  const FR = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
-  const y = ym.slice(0,4);
-  const m = Math.max(0, Math.min(11, parseInt(ym.slice(5,7),10)-1));
+function Utils_monthKeyToFr(ym) {
+  const FR = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+  const y = ym.slice(0, 4);
+  const m = Math.max(0, Math.min(11, parseInt(ym.slice(5, 7), 10) - 1));
   return `${FR[m]} ${y}`;
 }
 
@@ -393,8 +273,8 @@ function _adsFindExistingMonthRow_(sh, moisCol, targetYM) {
   if (last < START_ROW_ADS) return 0;
   for (let r = START_ROW_ADS; r <= last; r++) {
     const v = sh.getRange(r, moisCol).getValue();
-    if (isYearSeparatorRow_(v)) continue;
-    const ym = sheetCellToYYYYMM_(v);
+    if (Utils_isYearSeparatorRow(v)) continue;
+    const ym = Utils_sheetCellToYYYYMM(v);
     if (ym === targetYM) return r;
   }
   return 0;
@@ -412,8 +292,8 @@ function _adsFindOrInsertMonthRow_(sh, moisCol, targetYM) {
   // 1. Chercher si la ligne du mois existe déjà
   for (let r = START_ROW_ADS; r <= lastRow; r++) {
     const v = sh.getRange(r, moisCol).getValue();
-    if (isYearSeparatorRow_(v)) continue;
-    const ym = sheetCellToYYYYMM_(v);
+    if (Utils_isYearSeparatorRow(v)) continue;
+    const ym = Utils_sheetCellToYYYYMM(v);
     if (ym === targetYM) {
       Logger.log(`[Ads/INFO] Ligne pour ${targetYM} trouvée en ${r}. Utilisation de la ligne existante.`);
       return r;
@@ -432,7 +312,7 @@ function _adsFindOrInsertMonthRow_(sh, moisCol, targetYM) {
 
   const targetRow = lastDataRow + 1;
   const lastDataValue = lastDataRow >= START_ROW_ADS ? sh.getRange(lastDataRow, moisCol).getValue() : '';
-  const lastDataYM = sheetCellToYYYYMM_(lastDataValue) || '1999-12';
+  const lastDataYM = Utils_sheetCellToYYYYMM(lastDataValue) || '1999-12';
 
   // 3. Gérer le cas particulier du changement d'année
   const lastYear = parseInt(lastDataYM.slice(0, 4), 10);
@@ -452,7 +332,7 @@ function _adsFindOrInsertMonthRow_(sh, moisCol, targetYM) {
 }
 
 // ÉCRITURE (in-place, cellule par cellule pour préserver les formules)
-function writeAdsMonthlyToSheetFlexible(data){
+function writeAdsMonthlyToSheetFlexible(data) {
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME_ADS);
   if (!sh) throw new Error(`Onglet ${SHEET_NAME_ADS} introuvable`);
 
@@ -460,11 +340,11 @@ function writeAdsMonthlyToSheetFlexible(data){
   const monthKeys = Object.keys(byMonth).sort();
   if (!monthKeys.length) { Logger.log('[Ads] Aucune donnée agrégée à écrire.'); return; }
 
-  const moisCol   = findColByHeaderAliases_(sh, ['mois'], HEADERS_ROW_ADS);
-  const budgetCol = findColByHeaderAliases_(sh, ['budget investi','depenses','depense','cout','coût','spend','cost'], HEADERS_ROW_ADS);
-  const impCol    = findColByHeaderAliases_(sh, ['impressions','nb impressions','nombre dimpressions','nombre d impressions'], HEADERS_ROW_ADS);
-  const clkCol    = findColByHeaderAliases_(sh, ['clics','clicks','nb clics','nombre de clics'], HEADERS_ROW_ADS);
-  const cpcCol    = findColByHeaderAliases_(sh, ['cpc','cout par clic','coût par clic','cost per click'], HEADERS_ROW_ADS);
+  const moisCol = Utils_findColByHeaderAliases(sh, ['mois'], HEADERS_ROW_ADS);
+  const budgetCol = Utils_findColByHeaderAliases(sh, ['budget investi', 'depenses', 'depense', 'cout', 'coût', 'spend', 'cost'], HEADERS_ROW_ADS);
+  const impCol = Utils_findColByHeaderAliases(sh, ['impressions', 'nb impressions', 'nombre dimpressions', 'nombre d impressions'], HEADERS_ROW_ADS);
+  const clkCol = Utils_findColByHeaderAliases(sh, ['clics', 'clicks', 'nb clics', 'nombre de clics'], HEADERS_ROW_ADS);
+  const cpcCol = Utils_findColByHeaderAliases(sh, ['cpc', 'cout par clic', 'coût par clic', 'cost per click'], HEADERS_ROW_ADS);
 
   // On ne vérifie que la colonne 'Mois' car les autres sont optionnelles
   if (!moisCol) throw new Error("[Ads] Colonne 'Mois' introuvable.");
@@ -474,12 +354,12 @@ function writeAdsMonthlyToSheetFlexible(data){
     const v = byMonth[k];
     const row = _adsFindOrInsertMonthRow_(sh, moisCol, k);
 
-    setPreserveFormula_(sh, row, moisCol, monthKeyToFr_(k));
+    Utils_setPreserveFormula(sh, row, moisCol, Utils_monthKeyToFr(k));
 
-    setPreserveFormula_(sh, row, budgetCol, v.cost, '0.00 €');
-    setPreserveFormula_(sh, row, impCol,    v.impressions, null);
-    setPreserveFormula_(sh, row, clkCol,    v.clicks, null);
-    setPreserveFormula_(sh, row, cpcCol,    v.cpc, '0.00 €');
+    Utils_setPreserveFormula(sh, row, budgetCol, v.cost, '0.00 €');
+    Utils_setPreserveFormula(sh, row, impCol, v.impressions, null);
+    Utils_setPreserveFormula(sh, row, clkCol, v.clicks, null);
+    Utils_setPreserveFormula(sh, row, cpcCol, v.cpc, '0.00 €');
     wrote++;
   }
   Logger.log(`[Ads in-place] Mois écrits/MAJ: ${wrote}`);
@@ -490,9 +370,9 @@ function writeAdsMonthlyToSheetFlexible(data){
 function run_GAds_FullHistory() {
   const today = new Date();
   const start = FULLHIST_START_LOCAL;                                // ← forcer Jan 2024
-  const end   = new Date(today.getFullYear(), today.getMonth(), 0);
+  const end = new Date(today.getFullYear(), today.getMonth(), 0);
   const startStr = Utilities.formatDate(start, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  const endStr   = Utilities.formatDate(end,   Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const endStr = Utilities.formatDate(end, Session.getScriptTimeZone(), 'yyyy-MM-dd');
   const data = fetchGoogleAdsMonthly(startStr, endStr);
   writeAdsMonthlyToSheetFlexible(data);
 }
@@ -502,13 +382,13 @@ function run_GAds_AddLastMonth() {
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME_ADS);
   if (!sh) throw new Error(`Onglet ${SHEET_NAME_ADS} introuvable`);
 
-  const moisCol   = findColByHeaderAliases_(sh, ['mois'], HEADERS_ROW_ADS);
-  const budgetCol = findColByHeaderAliases_(sh, ['budget investi','depenses','depense','cout','coût','spend','cost'], HEADERS_ROW_ADS);
-  const impCol    = findColByHeaderAliases_(sh, ['impressions','nb impressions','nombre dimpressions','nombre d impressions'], HEADERS_ROW_ADS);
-  const clkCol    = findColByHeaderAliases_(sh, ['clics','clicks','nb clics','nombre de clics'], HEADERS_ROW_ADS);
-  const ctrCol    = findColByHeaderAliases_(sh, ['ctr','taux de clics','click through rate'], HEADERS_ROW_ADS);
-  const cpcCol    = findColByHeaderAliases_(sh, ['cpc','cout par clic','coût par clic','cost per click'], HEADERS_ROW_ADS);
-  const callsCol  = findColByHeaderAliases_(sh, ['appels google ads','appels','calls','nombre dappels'], HEADERS_ROW_ADS);
+  const moisCol = Utils_findColByHeaderAliases(sh, ['mois'], HEADERS_ROW_ADS);
+  const budgetCol = Utils_findColByHeaderAliases(sh, ['budget investi', 'depenses', 'depense', 'cout', 'coût', 'spend', 'cost'], HEADERS_ROW_ADS);
+  const impCol = Utils_findColByHeaderAliases(sh, ['impressions', 'nb impressions', 'nombre dimpressions', 'nombre d impressions'], HEADERS_ROW_ADS);
+  const clkCol = Utils_findColByHeaderAliases(sh, ['clics', 'clicks', 'nb clics', 'nombre de clics'], HEADERS_ROW_ADS);
+  const ctrCol = Utils_findColByHeaderAliases(sh, ['ctr', 'taux de clics', 'click through rate'], HEADERS_ROW_ADS);
+  const cpcCol = Utils_findColByHeaderAliases(sh, ['cpc', 'cout par clic', 'coût par clic', 'cost per click'], HEADERS_ROW_ADS);
+  const callsCol = Utils_findColByHeaderAliases(sh, ['appels google ads', 'appels', 'calls', 'nombre dappels'], HEADERS_ROW_ADS);
 
   const missing = [];
   if (!moisCol) missing.push('Mois');
@@ -521,12 +401,12 @@ function run_GAds_AddLastMonth() {
 
   const today = new Date();
   const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-  const end   = new Date(today.getFullYear(), today.getMonth(), 0);
+  const end = new Date(today.getFullYear(), today.getMonth(), 0);
   const ymKey = Utilities.formatDate(start, Session.getScriptTimeZone(), 'yyyy-MM');
 
   const data = fetchGoogleAdsMonthly(
     Utilities.formatDate(start, Session.getScriptTimeZone(), 'yyyy-MM-dd'),
-    Utilities.formatDate(end,   Session.getScriptTimeZone(), 'yyyy-MM-dd')
+    Utilities.formatDate(end, Session.getScriptTimeZone(), 'yyyy-MM-dd')
   );
   const byMonth = aggregateAdsByMonth_(data);
   const v = byMonth[ymKey];
@@ -536,17 +416,17 @@ function run_GAds_AddLastMonth() {
 
   const moisCell = sh.getRange(row, moisCol);
   if (!moisCell.getFormula()) {
-    moisCell.setValue(monthKeyToFr_(ymKey));
+    moisCell.setValue(Utils_monthKeyToFr(ymKey));
   } else {
     Logger.log(`[SKIP] Préserve formule en ${moisCell.getA1Notation()}`);
   }
 
-  setPreserveFormula_(sh, row, budgetCol, v.cost, '0.00');
-  setPreserveFormula_(sh, row, impCol,    v.impressions, null);
-  setPreserveFormula_(sh, row, clkCol,    v.clicks, null);
-  setPreserveFormula_(sh, row, ctrCol,    v.ctr, '0.00%');
-  setPreserveFormula_(sh, row, cpcCol,    v.cpc, '0.00');
-  if (callsCol) setPreserveFormula_(sh, row, callsCol, v.calls || 0, null);
+  Utils_setPreserveFormula(sh, row, budgetCol, v.cost, '0.00');
+  Utils_setPreserveFormula(sh, row, impCol, v.impressions, null);
+  Utils_setPreserveFormula(sh, row, clkCol, v.clicks, null);
+  Utils_setPreserveFormula(sh, row, ctrCol, v.ctr, '0.00%');
+  Utils_setPreserveFormula(sh, row, cpcCol, v.cpc, '0.00');
+  if (callsCol) Utils_setPreserveFormula(sh, row, callsCol, v.calls || 0, null);
 
   Logger.log(`[GAds AddLastMonth] ${ymKey} -> cost=${v.cost}, imp=${v.impressions}, clk=${v.clicks}, ctr=${v.ctr}, cpc=${v.cpc}`);
 }
@@ -557,38 +437,38 @@ function run_GAds_AddLastMonth() {
 function _adsFindDerivedCols_(sh) {
   return {
     // lecture uniquement
-    clicks:  findColByHeaderAliases_(sh, ['clics','clicks','nb clics','nombre de clics'], HEADERS_ROW_ADS),
-    impr:    findColByHeaderAliases_(sh, ['impressions','nb impressions','nombre dimpressions','nombre d impressions'], HEADERS_ROW_ADS),
-    appels:  findColByHeaderAliases_(sh, ["nombre d'appels","nombre dappels","appels","appels google ads"], HEADERS_ROW_ADS),
-    forms:   findColByHeaderAliases_(sh, ['nombre de formulaire','formulaires','forms','paperform','monday forms','submissions','soumissions'], HEADERS_ROW_ADS),
+    clicks: Utils_findColByHeaderAliases(sh, ['clics', 'clicks', 'nb clics', 'nombre de clics'], HEADERS_ROW_ADS),
+    impr: Utils_findColByHeaderAliases(sh, ['impressions', 'nb impressions', 'nombre dimpressions', 'nombre d impressions'], HEADERS_ROW_ADS),
+    appels: Utils_findColByHeaderAliases(sh, ["nombre d'appels", "nombre dappels", "appels", "appels google ads"], HEADERS_ROW_ADS),
+    forms: Utils_findColByHeaderAliases(sh, ['nombre de formulaire', 'formulaires', 'forms', 'paperform', 'monday forms', 'submissions', 'soumissions'], HEADERS_ROW_ADS),
 
     // écriture : seulement Taux de conversion & CTR (plus de CPL, ne touche pas "Nombre de contacts")
-    tauxConv:findColByHeaderAliases_(sh, ['taux de conversion','conversion rate','cr'], HEADERS_ROW_ADS),
-    ctrCol:  findColByHeaderAliases_(sh, ['ctr','taux de clics','click through rate'], HEADERS_ROW_ADS)
+    tauxConv: Utils_findColByHeaderAliases(sh, ['taux de conversion', 'conversion rate', 'cr'], HEADERS_ROW_ADS),
+    ctrCol: Utils_findColByHeaderAliases(sh, ['ctr', 'taux de clics', 'click through rate'], HEADERS_ROW_ADS)
   };
 }
 
 function _adsRecomputeDerivedForRow_(sh, r, cols) {
   const moisVal = sh.getRange(r, 1).getValue();
-  if (isYearSeparatorRow_(moisVal)) return;
-  if (!sheetCellToYYYYMM_(moisVal)) return;
+  if (Utils_isYearSeparatorRow(moisVal)) return;
+  if (!Utils_sheetCellToYYYYMM(moisVal)) return;
 
   const getN = (c) => (c ? Number(sh.getRange(r, c).getValue() || 0) : 0);
 
   const clicks = getN(cols.clicks);
-  const impr   = getN(cols.impr);
+  const impr = getN(cols.impr);
   const appels = getN(cols.appels);
-  const forms  = getN(cols.forms);
+  const forms = getN(cols.forms);
 
   const contactsLocal = appels + forms;
   const tauxConv = clicks > 0 ? (contactsLocal / clicks) : 0;
-  const ctr      = impr > 0   ? (clicks / impr)          : 0;
+  const ctr = impr > 0 ? (clicks / impr) : 0;
 
   if (cols.tauxConv) {
-    setPreserveFormula_(sh, r, cols.tauxConv, tauxConv, '0.00%');
+    Utils_setPreserveFormula(sh, r, cols.tauxConv, tauxConv, '0.00%');
   }
   if (cols.ctrCol) {
-    setPreserveFormula_(sh, r, cols.ctrCol, ctr, '0.00%');
+    Utils_setPreserveFormula(sh, r, cols.ctrCol, ctr, '0.00%');
   }
 }
 
@@ -613,13 +493,13 @@ function run_Ads_Derived_RecomputeLastMonth() {
   if (last < START_ROW_ADS) return;
 
   const today = new Date();
-  const targetYM = Utilities.formatDate(new Date(today.getFullYear(), today.getMonth()-1, 1),
-                                        Session.getScriptTimeZone(), 'yyyy-MM');
+  const targetYM = Utilities.formatDate(new Date(today.getFullYear(), today.getMonth() - 1, 1),
+    Session.getScriptTimeZone(), 'yyyy-MM');
 
   for (let r = START_ROW_ADS; r <= last; r++) {
     const val = sh.getRange(r, 1).getValue();
-    if (isYearSeparatorRow_(val)) continue;
-    if (sheetCellToYYYYMM_(val) === targetYM) {
+    if (Utils_isYearSeparatorRow(val)) continue;
+    if (Utils_sheetCellToYYYYMM(val) === targetYM) {
       _adsRecomputeDerivedForRow_(sh, r, cols);
       Logger.log(`[Derived] N-1 recalculé (${targetYM})`);
       break;
@@ -636,12 +516,12 @@ function run_Ads_Derived_RecomputeCurrentMonth() {
 
   const today = new Date();
   const targetYM = Utilities.formatDate(new Date(today.getFullYear(), today.getMonth(), 1),
-                                        Session.getScriptTimeZone(), 'yyyy-MM');
+    Session.getScriptTimeZone(), 'yyyy-MM');
 
   for (let r = START_ROW_ADS; r <= last; r++) {
     const val = sh.getRange(r, 1).getValue();
-    if (isYearSeparatorRow_(val)) continue;
-    if (sheetCellToYYYYMM_(val) === targetYM) {
+    if (Utils_isYearSeparatorRow(val)) continue;
+    if (Utils_sheetCellToYYYYMM(val) === targetYM) {
       _adsRecomputeDerivedForRow_(sh, r, cols);
       Logger.log(`[Derived] Mois en cours recalculé (${targetYM})`);
       break;
@@ -653,7 +533,7 @@ function run_Ads_Derived_RecomputeCurrentMonth() {
 
 const MAG_TIMEZONE = 'Europe/Paris';
 const MAG_NUMBER_IDS_ADS = []; // si tu veux limiter à certains numéros
-const MAG_ADS_CHANNEL_NAMES = ['google ads','adwords','google/cpc','paid search','sea'];
+const MAG_ADS_CHANNEL_NAMES = ['google ads', 'adwords', 'google/cpc', 'paid search', 'sea'];
 const MAG_CHANNEL_MATCH = 'equals'; // 'equals' | 'includes' | 'regex'
 const MAG_COUNT_ANSWERED_ONLY = false;
 
@@ -666,7 +546,7 @@ function valAt_(obj, path) {
   return path.split('.').reduce((o, k) => (o && o[k] != null ? o[k] : undefined), obj);
 }
 function getChannelName_(c) {
-  const candidates = ['channel_name','channel','analysis.channel','analytics.channel','utm.channel','session.channel'];
+  const candidates = ['channel_name', 'channel', 'analysis.channel', 'analytics.channel', 'utm.channel', 'session.channel'];
   for (const p of candidates) {
     const v = valAt_(c, p);
     if (v != null && String(v).trim() !== '') return String(v).trim().toLowerCase();
@@ -678,8 +558,8 @@ function channelMatchesAds_(name) {
   const list = MAG_ADS_CHANNEL_NAMES.map(x => String(x).toLowerCase());
   switch (MAG_CHANNEL_MATCH) {
     case 'includes': return list.some(a => name.includes(a));
-    case 'regex':    return list.some(rx => new RegExp(rx, 'i').test(name));
-    default:         return list.some(a => name === a);
+    case 'regex': return list.some(rx => new RegExp(rx, 'i').test(name));
+    default: return list.some(a => name === a);
   }
 }
 function isGoogleAdsCall_(c) {
@@ -698,7 +578,7 @@ function magnetisFetchCalls_(fromDate, toDate, extraParams = {}) {
 
   let start = new Date(fromDate), end = new Date(toDate);
   if (isNaN(start.getTime()) || isNaN(end.getTime())) throw new Error('Dates invalides (Magnetis)');
-  if (start > end) { const t=start; start=end; end=t; }
+  if (start > end) { const t = start; start = end; end = t; }
 
   const fromStr = fmtUTC(start), toStr = fmtUTC(end);
 
@@ -728,7 +608,7 @@ function magnetisAggregateMonthlyCounts_(calls) {
     if (!rawDate) return;
     const d = new Date(rawDate);
     if (isNaN(d.getTime())) return;
-    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 
     if (MAG_COUNT_ANSWERED_ONLY) {
       const duration = Number(c.duration || (c.analysis && c.analysis.duration) || 0);
@@ -744,22 +624,22 @@ function run_MagnetisToAds_SyncForSheet() {
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME_ADS);
   if (!sh) throw new Error(`Onglet ${SHEET_NAME_ADS} introuvable`);
 
-  const CALLS_COL = findColByHeaderAliases_(sh, ["nombre d'appels","nombre dappels","appels","appels google ads"], HEADERS_ROW_ADS);
+  const CALLS_COL = Utils_findColByHeaderAliases(sh, ["nombre d'appels", "nombre dappels", "appels", "appels google ads"], HEADERS_ROW_ADS);
   if (!CALLS_COL) throw new Error(`Colonne 'Nombre d’appels' introuvable (ligne ${HEADERS_ROW_ADS}).`);
 
   const today = new Date();
   const from = FULLHIST_START_LOCAL;                                   // ← Jan 2024
-  const to   = new Date(today.getFullYear(), today.getMonth(), 0);
+  const to = new Date(today.getFullYear(), today.getMonth(), 0);
 
   const callsByMonth = magnetisAggregateMonthlyCounts_(magnetisFetchCalls_(from, to));
   const last = sh.getLastRow();
 
   for (let r = START_ROW_ADS; r <= last; r++) {
     const cell = sh.getRange(r, 1).getValue();
-    if (isYearSeparatorRow_(cell)) continue;
-    const ym = sheetCellToYYYYMM_(cell);
+    if (Utils_isYearSeparatorRow(cell)) continue;
+    const ym = Utils_sheetCellToYYYYMM(cell);
     if (!ym) continue;
-    setPreserveFormula_(sh, r, CALLS_COL, callsByMonth[ym] || 0);
+    Utils_setPreserveFormula(sh, r, CALLS_COL, callsByMonth[ym] || 0);
   }
 }
 
@@ -767,26 +647,26 @@ function run_MagnetisToAds_AddLastMonth() {
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME_ADS);
   if (!sh) throw new Error(`Onglet ${SHEET_NAME_ADS} introuvable`);
 
-  const CALLS_COL = findColByHeaderAliases_(sh, ["nombre d'appels","nombre dappels","appels","appels google ads"], HEADERS_ROW_ADS);
+  const CALLS_COL = Utils_findColByHeaderAliases(sh, ["nombre d'appels", "nombre dappels", "appels", "appels google ads"], HEADERS_ROW_ADS);
   if (!CALLS_COL) throw new Error(`Colonne 'Nombre d’appels' introuvable (ligne ${HEADERS_ROW_ADS}).`);
 
   const today = new Date();
-  const monthKey = Utilities.formatDate(new Date(today.getFullYear(), today.getMonth()-1, 1), Session.getScriptTimeZone(), 'yyyy-MM');
-  const start = new Date(today.getFullYear(), today.getMonth()-1, 1);
-  const end   = new Date(today.getFullYear(), today.getMonth(), 0);
+  const monthKey = Utilities.formatDate(new Date(today.getFullYear(), today.getMonth() - 1, 1), Session.getScriptTimeZone(), 'yyyy-MM');
+  const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  const end = new Date(today.getFullYear(), today.getMonth(), 0);
 
   const byMonth = magnetisAggregateMonthlyCounts_(magnetisFetchCalls_(start, end));
   const n = byMonth[monthKey] || 0;
 
   const last = sh.getLastRow();
   for (let r = START_ROW_ADS; r <= last; r++) {
-    const val = sh.getRange(r,1).getValue();
-    if (isYearSeparatorRow_(val)) continue;
-    const ym = sheetCellToYYYYMM_(val);
+    const val = sh.getRange(r, 1).getValue();
+    if (Utils_isYearSeparatorRow(val)) continue;
+    const ym = Utils_sheetCellToYYYYMM(val);
     if (ym === monthKey) {
       // Correction: la variable était FORMS_COL au lieu de CALLS_COL
       // et l'appel doit être sécurisé.
-      setPreserveFormula_(sh, r, CALLS_COL, n);
+      Utils_setPreserveFormula(sh, r, CALLS_COL, n);
       break;
     }
   }
@@ -795,12 +675,12 @@ function run_MagnetisToAds_CurrentMonth() {
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME_ADS);
   if (!sh) throw new Error(`Onglet ${SHEET_NAME_ADS} introuvable`);
 
-  const CALLS_COL = findColByHeaderAliases_(sh, ["nombre d'appels","nombre dappels","appels","appels google ads"], HEADERS_ROW_ADS);
+  const CALLS_COL = Utils_findColByHeaderAliases(sh, ["nombre d'appels", "nombre dappels", "appels", "appels google ads"], HEADERS_ROW_ADS);
   if (!CALLS_COL) throw new Error(`Colonne 'Nombre d’appels' introuvable (ligne ${HEADERS_ROW_ADS}).`);
 
   const today = new Date();
   const start = new Date(today.getFullYear(), today.getMonth(), 1);
-  const end   = today;
+  const end = today;
   const monthKey = Utilities.formatDate(start, Session.getScriptTimeZone(), 'yyyy-MM');
 
   const byMonth = magnetisAggregateMonthlyCounts_(magnetisFetchCalls_(start, end));
@@ -808,11 +688,11 @@ function run_MagnetisToAds_CurrentMonth() {
 
   const last = sh.getLastRow();
   for (let r = START_ROW_ADS; r <= last; r++) {
-    const val = sh.getRange(r,1).getValue();
-    if (isYearSeparatorRow_(val)) continue;
-    const ym = sheetCellToYYYYMM_(val);
+    const val = sh.getRange(r, 1).getValue();
+    if (Utils_isYearSeparatorRow(val)) continue;
+    const ym = Utils_sheetCellToYYYYMM(val);
     if (ym === monthKey) {
-      setPreserveFormula_(sh, r, CALLS_COL, n);
+      Utils_setPreserveFormula(sh, r, CALLS_COL, n);
       break;
     }
   }
@@ -851,7 +731,7 @@ function extractPaperformArray_(json) {
 function parsePaperformHumanDateToUTC_(str) {
   if (!str || typeof str !== 'string') return new Date(NaN);
   const s = str.trim().replace(/\s+/g, ' ');
-  const MM = { jan:0,january:0,feb:1,february:1,mar:2,march:2,apr:3,april:3,may:4,jun:5,june:5,jul:6,july:6,aug:7,august:7,sep:8,sept:8,september:8,oct:9,october:9,nov:10,november:10,dec:11,december:11 };
+  const MM = { jan: 0, january: 0, feb: 1, february: 1, mar: 2, march: 2, apr: 3, april: 3, may: 4, jun: 5, june: 5, jul: 6, july: 6, aug: 7, august: 7, sep: 8, sept: 8, september: 8, oct: 9, october: 9, nov: 10, november: 10, dec: 11, december: 11 };
   const rx = /^([A-Za-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?\s+(\d{2,4})[, ]\s*(\d{1,2}):(\d{2})\s*(am|pm)$/i;
   const m = s.match(rx);
   if (!m) return new Date(NaN);
@@ -873,9 +753,9 @@ function parsePaperformHumanDateToUTC_(str) {
 function getSubmissionDate_(s) {
   const candidates = [
     s.submitted_at, s.submittedAt, s.submitted_at_utc, s.submittedAtUTC,
-    s.created_at,   s.createdAt,   s.created_at_utc,   s.createdAtUTC,
-    s.date,         s.timestamp,   s.time_submitted,   s.timeSubmitted,
-    s.created,      s.submitted,   (s.meta && (s.meta.submitted_at || s.meta.created_at))
+    s.created_at, s.createdAt, s.created_at_utc, s.createdAtUTC,
+    s.date, s.timestamp, s.time_submitted, s.timeSubmitted,
+    s.created, s.submitted, (s.meta && (s.meta.submitted_at || s.meta.created_at))
   ];
   for (let v of candidates) {
     if (v == null) continue;
@@ -940,7 +820,7 @@ function paperformAggregateMonthlyCounts_(subs) {
   subs.forEach(s => {
     const d = getSubmissionDate_(s);
     if (isNaN(d.getTime())) return;
-    const key = d.getUTCFullYear() + '-' + String(d.getUTCMonth()+1).padStart(2, '0');
+    const key = d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0');
     if (!bucket[key]) bucket[key] = 0;
     bucket[key] += 1;
   });
@@ -963,7 +843,7 @@ const MONDAY_MATCH_VALUES = []; // si equals/includes
 /***** MONDAY LEADS (Google Ads) — config *****/
 const MONDAY_LEADS_BOARD_ID = MONDAY_BOARD_ID; // même board
 const MONDAY_LEADS_COL_SOURCE = 'Source du Lead';
-const MONDAY_LEADS_COL_TYPE   = 'FORMULAIRE / APPELS';
+const MONDAY_LEADS_COL_TYPE = 'FORMULAIRE / APPELS';
 const MONDAY_LEADS_COL_STATUS = 'Nature du contact';
 
 // égalité stricte (insensible casse/accents)
@@ -972,17 +852,17 @@ const MONDAY_LEADS_SOURCE_EQUALS = 'LP (via Google Ads)';
 const MONDAY_LEADS_STATUS_MATCH = ['lead'];
 
 // reconnaissance du type
-const MONDAY_LEADS_TYPE_CALL_MATCH = ['Appel','call','téléphone'];
-const MONDAY_LEADS_TYPE_FORM_MATCH = ['Formulaire','form','paperform'];
+const MONDAY_LEADS_TYPE_CALL_MATCH = ['Appel', 'call', 'téléphone'];
+const MONDAY_LEADS_TYPE_FORM_MATCH = ['Formulaire', 'form', 'paperform'];
 
-function _textEquals_(txt, want){
-  const a = _norm_(txt||'');
-  const b = _norm_(want||'');
+function _textEquals_(txt, want) {
+  const a = _norm_(txt || '');
+  const b = _norm_(want || '');
   return a === b;
 }
-function _textIncludesAny_(txt, arr){
-  const t = _norm_(txt||'');
-  return (arr||[]).some(v => t.includes(_norm_(v)));
+function _textIncludesAny_(txt, arr) {
+  const t = _norm_(txt || '');
+  return (arr || []).some(v => t.includes(_norm_(v)));
 }
 
 function getMondayToken_() {
@@ -1009,9 +889,9 @@ function mondayGraphQL_(query, variables) {
   return body.data;
 }
 function _norm_(s) {
-  return String(s||'').toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .replace(/[’'`]/g,'').replace(/\s+/g,' ').trim();
+  return String(s || '').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[’'`]/g, '').replace(/\s+/g, ' ').trim();
 }
 function mondayResolveColumnIdByTitleOrId_(boardId, titleOrId) {
   if (!titleOrId) return '';
@@ -1039,7 +919,7 @@ function mondayResolveColumnIdByTitleOrId_(boardId, titleOrId) {
   return best;
 }
 function mondayValueMatches_(colValueText) {
-  const txt = _norm_(colValueText||'');
+  const txt = _norm_(colValueText || '');
   switch (MONDAY_MATCH_MODE) {
     case 'equals':
       return MONDAY_MATCH_VALUES.some(v => txt === _norm_(v));
@@ -1081,7 +961,7 @@ function mondayFetchFormCountsByMonth_(boardId, columnIdOrTitle, fromDateUTC, to
     if (!page) break;
 
     (page.items || []).forEach(it => {
-      if (String(it.state||'').toLowerCase() === 'archived') return;
+      if (String(it.state || '').toLowerCase() === 'archived') return;
       const d = new Date(it.created_at);
       if (isNaN(d.getTime())) return;
       if (d < fromDateUTC || d > toDateUTC) return;
@@ -1090,7 +970,7 @@ function mondayFetchFormCountsByMonth_(boardId, columnIdOrTitle, fromDateUTC, to
       const ok = mondayValueMatches_(cv && cv.text);
       if (!ok) return;
 
-      const key = d.getUTCFullYear() + '-' + String(d.getUTCMonth()+1).padStart(2,'0');
+      const key = d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0');
       counts[key] = (counts[key] || 0) + 1;
     });
 
@@ -1101,14 +981,14 @@ function mondayFetchFormCountsByMonth_(boardId, columnIdOrTitle, fromDateUTC, to
 }
 
 // { 'YYYY-MM': n } — APPELS lead (source == "LP (via Google Ads)" && status ∈ ["lead"] && type ~ appel)
-function mondayLeadCallsCountsByMonth_Ads_(boardId, colSource, colType, colStatus, fromUTC, toUTC){
+function mondayLeadCallsCountsByMonth_Ads_(boardId, colSource, colType, colStatus, fromUTC, toUTC) {
   const sourceId = mondayResolveColumnIdByTitleOrId_(boardId, colSource);
-  const typeId   = mondayResolveColumnIdByTitleOrId_(boardId, colType);
+  const typeId = mondayResolveColumnIdByTitleOrId_(boardId, colType);
   const statusId = mondayResolveColumnIdByTitleOrId_(boardId, colStatus);
   if (!sourceId || !typeId || !statusId) throw new Error('[Monday leads calls] Colonnes introuvables (source/type/status).');
 
   const counts = {}; let cursor = null;
-  do{
+  do {
     const q = `
       query($bid:[ID!], $cursor:String, $cols:[String!]){
         boards(ids:$bid){
@@ -1121,25 +1001,25 @@ function mondayLeadCallsCountsByMonth_Ads_(boardId, colSource, colType, colStatu
           }
         }
       }`;
-    const d = mondayGraphQL_(q, { bid:[Number(boardId)], cursor, cols:[sourceId,typeId,statusId] });
+    const d = mondayGraphQL_(q, { bid: [Number(boardId)], cursor, cols: [sourceId, typeId, statusId] });
     const page = d && d.boards && d.boards[0] && d.boards[0].items_page; if (!page) break;
 
-    (page.items||[]).forEach(it=>{
-      if (String(it.state||'').toLowerCase()==='archived') return;
+    (page.items || []).forEach(it => {
+      if (String(it.state || '').toLowerCase() === 'archived') return;
       const when = new Date(it.created_at); if (isNaN(when.getTime())) return;
       if (when < fromUTC || when > toUTC) return;
 
       const cv = it.column_values || [];
-      const src = (cv.find(c=>c.id===sourceId)||{}).text || '';
-      const typ = (cv.find(c=>c.id===typeId)  ||{}).text || '';
-      const sts = (cv.find(c=>c.id===statusId)||{}).text || '';
+      const src = (cv.find(c => c.id === sourceId) || {}).text || '';
+      const typ = (cv.find(c => c.id === typeId) || {}).text || '';
+      const sts = (cv.find(c => c.id === statusId) || {}).text || '';
 
       if (!_textEquals_(src, MONDAY_LEADS_SOURCE_EQUALS)) return;
       if (!_textIncludesAny_(sts, MONDAY_LEADS_STATUS_MATCH)) return;
       if (!_textIncludesAny_(typ, MONDAY_LEADS_TYPE_CALL_MATCH)) return;
 
-      const key = when.getUTCFullYear()+'-'+String(when.getUTCMonth()+1).padStart(2,'0');
-      counts[key] = (counts[key]||0) + 1;
+      const key = when.getUTCFullYear() + '-' + String(when.getUTCMonth() + 1).padStart(2, '0');
+      counts[key] = (counts[key] || 0) + 1;
     });
     cursor = page.cursor;
   } while (cursor);
@@ -1148,14 +1028,14 @@ function mondayLeadCallsCountsByMonth_Ads_(boardId, colSource, colType, colStatu
 }
 
 // { 'YYYY-MM': n } — FORMULAIRES lead (source == "LP (via Google Ads)" && status ∈ ["lead"] && type ~ formulaire)
-function mondayLeadFormsCountsByMonth_Ads_(boardId, colSource, colType, colStatus, fromUTC, toUTC){
+function mondayLeadFormsCountsByMonth_Ads_(boardId, colSource, colType, colStatus, fromUTC, toUTC) {
   const sourceId = mondayResolveColumnIdByTitleOrId_(boardId, colSource);
-  const typeId   = mondayResolveColumnIdByTitleOrId_(boardId, colType);
+  const typeId = mondayResolveColumnIdByTitleOrId_(boardId, colType);
   const statusId = mondayResolveColumnIdByTitleOrId_(boardId, colStatus);
   if (!sourceId || !typeId || !statusId) throw new Error('[Monday leads forms] Colonnes introuvables (source/type/status).');
 
   const counts = {}; let cursor = null;
-  do{
+  do {
     const q = `
       query($bid:[ID!], $cursor:String, $cols:[String!]){
         boards(ids:$bid){
@@ -1168,25 +1048,25 @@ function mondayLeadFormsCountsByMonth_Ads_(boardId, colSource, colType, colStatu
           }
         }
       }`;
-    const d = mondayGraphQL_(q, { bid:[Number(boardId)], cursor, cols:[sourceId,typeId,statusId] });
+    const d = mondayGraphQL_(q, { bid: [Number(boardId)], cursor, cols: [sourceId, typeId, statusId] });
     const page = d && d.boards && d.boards[0] && d.boards[0].items_page; if (!page) break;
 
-    (page.items||[]).forEach(it=>{
-      if (String(it.state||'').toLowerCase()==='archived') return;
+    (page.items || []).forEach(it => {
+      if (String(it.state || '').toLowerCase() === 'archived') return;
       const when = new Date(it.created_at); if (isNaN(when.getTime())) return;
       if (when < fromUTC || when > toUTC) return;
 
       const cv = it.column_values || [];
-      const src = (cv.find(c=>c.id===sourceId)||{}).text || '';
-      const typ = (cv.find(c=>c.id===typeId)  ||{}).text || '';
-      const sts = (cv.find(c=>c.id===statusId)||{}).text || '';
+      const src = (cv.find(c => c.id === sourceId) || {}).text || '';
+      const typ = (cv.find(c => c.id === typeId) || {}).text || '';
+      const sts = (cv.find(c => c.id === statusId) || {}).text || '';
 
       if (!_textEquals_(src, MONDAY_LEADS_SOURCE_EQUALS)) return;
       if (!_textIncludesAny_(sts, MONDAY_LEADS_STATUS_MATCH)) return;
       if (!_textIncludesAny_(typ, MONDAY_LEADS_TYPE_FORM_MATCH)) return;
 
-      const key = when.getUTCFullYear()+'-'+String(when.getUTCMonth()+1).padStart(2,'0');
-      counts[key] = (counts[key]||0) + 1;
+      const key = when.getUTCFullYear() + '-' + String(when.getUTCMonth() + 1).padStart(2, '0');
+      counts[key] = (counts[key] || 0) + 1;
     });
     cursor = page.cursor;
   } while (cursor);
@@ -1196,105 +1076,105 @@ function mondayLeadFormsCountsByMonth_Ads_(boardId, colSource, colType, colStatu
 
 /************** Monday Leads → écrire colonnes lead **************/
 
-function run_MondayLeadsToAds_SyncForSheet(){
+function run_MondayLeadsToAds_SyncForSheet() {
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME_ADS);
   if (!sh) throw new Error(`Onglet ${SHEET_NAME_ADS} introuvable`);
 
   // ➜ crée / trouve les colonnes demandées
-  const CALLS_LEAD_COL = ensureColByHeader_(sh, "Nombre d'appels lead");
-  const FORMS_LEAD_COL = ensureColByHeader_(sh, "Nombre de formulaire lead");
+  const CALLS_LEAD_COL = Utils_ensureColByHeader(sh, "Nombre d'appels lead");
+  const FORMS_LEAD_COL = Utils_ensureColByHeader(sh, "Nombre de formulaire lead");
 
   // Fenêtre forcée : Jan 2024 → fin du mois précédent (UTC)
   const from = FULLHIST_START_UTC;
-  const now  = new Date();
-  const to   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0, 23,59,59));
+  const now = new Date();
+  const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0, 23, 59, 59));
 
   let callsByMonth = {}, formsByMonth = {};
   try {
     callsByMonth = mondayLeadCallsCountsByMonth_Ads_(MONDAY_LEADS_BOARD_ID, MONDAY_LEADS_COL_SOURCE, MONDAY_LEADS_COL_TYPE, MONDAY_LEADS_COL_STATUS, from, to);
-  } catch(e){ Logger.log('[Leads Ads] Calls KO: ' + e); }
+  } catch (e) { Logger.log('[Leads Ads] Calls KO: ' + e); }
   try {
     formsByMonth = mondayLeadFormsCountsByMonth_Ads_(MONDAY_LEADS_BOARD_ID, MONDAY_LEADS_COL_SOURCE, MONDAY_LEADS_COL_TYPE, MONDAY_LEADS_COL_STATUS, from, to);
-  } catch(e){ Logger.log('[Leads Ads] Forms KO: ' + e); }
+  } catch (e) { Logger.log('[Leads Ads] Forms KO: ' + e); }
 
   const last = sh.getLastRow();
-  for (let r = START_ROW_ADS; r <= last; r++){
+  for (let r = START_ROW_ADS; r <= last; r++) {
     const cell = sh.getRange(r, 1).getValue();
-    if (isYearSeparatorRow_(cell)) continue;
-    const ym = sheetCellToYYYYMM_(cell);
+    if (Utils_isYearSeparatorRow(cell)) continue;
+    const ym = Utils_sheetCellToYYYYMM(cell);
     if (!ym) continue; // ← ne rien écrire hors lignes mois
-    setPreserveFormula_(sh, r, CALLS_LEAD_COL, callsByMonth[ym] || 0);
-    setPreserveFormula_(sh, r, FORMS_LEAD_COL, formsByMonth[ym] || 0);
+    Utils_setPreserveFormula(sh, r, CALLS_LEAD_COL, callsByMonth[ym] || 0);
+    Utils_setPreserveFormula(sh, r, FORMS_LEAD_COL, formsByMonth[ym] || 0);
   }
 }
 
-function run_MondayLeadsToAds_AddLastMonth(){
+function run_MondayLeadsToAds_AddLastMonth() {
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME_ADS);
   if (!sh) throw new Error(`Onglet ${SHEET_NAME_ADS} introuvable`);
 
   // ➜ crée / trouve les colonnes demandées
-  const CALLS_LEAD_COL = ensureColByHeader_(sh, "Nombre d'appels lead");
-  const FORMS_LEAD_COL = ensureColByHeader_(sh, "Nombre de formulaire lead");
+  const CALLS_LEAD_COL = Utils_ensureColByHeader(sh, "Nombre d'appels lead");
+  const FORMS_LEAD_COL = Utils_ensureColByHeader(sh, "Nombre de formulaire lead");
 
   const now = new Date();
   const y = now.getUTCFullYear(), m = now.getUTCMonth();
-  const start = new Date(Date.UTC(y, m-1, 1, 0,0,0));
-  const end   = new Date(Date.UTC(y, m,   0, 23,59,59));
-  const ymKey = start.getUTCFullYear() + '-' + String(start.getUTCMonth()+1).padStart(2,'0');
+  const start = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0));
+  const end = new Date(Date.UTC(y, m, 0, 23, 59, 59));
+  const ymKey = start.getUTCFullYear() + '-' + String(start.getUTCMonth() + 1).padStart(2, '0');
 
   let nCalls = 0, nForms = 0;
   try {
     const c = mondayLeadCallsCountsByMonth_Ads_(MONDAY_LEADS_BOARD_ID, MONDAY_LEADS_COL_SOURCE, MONDAY_LEADS_COL_TYPE, MONDAY_LEADS_COL_STATUS, start, end);
     nCalls = c[ymKey] || 0;
-  } catch(e){ Logger.log('[Leads Ads N-1] Calls KO: ' + e); }
+  } catch (e) { Logger.log('[Leads Ads N-1] Calls KO: ' + e); }
   try {
     const f = mondayLeadFormsCountsByMonth_Ads_(MONDAY_LEADS_BOARD_ID, MONDAY_LEADS_COL_SOURCE, MONDAY_LEADS_COL_TYPE, MONDAY_LEADS_COL_STATUS, start, end);
     nForms = f[ymKey] || 0;
-  } catch(e){ Logger.log('[Leads Ads N-1] Forms KO: ' + e); }
+  } catch (e) { Logger.log('[Leads Ads N-1] Forms KO: ' + e); }
 
   const last = sh.getLastRow();
-  for (let r=START_ROW_ADS; r<=last; r++){
-    const val = sh.getRange(r,1).getValue();
-    if (isYearSeparatorRow_(val)) continue;
-    const ym = sheetCellToYYYYMM_(val);
-    if (ym === ymKey){
-      setPreserveFormula_(sh, r, CALLS_LEAD_COL, nCalls);
-      setPreserveFormula_(sh, r, FORMS_LEAD_COL, nForms);
+  for (let r = START_ROW_ADS; r <= last; r++) {
+    const val = sh.getRange(r, 1).getValue();
+    if (Utils_isYearSeparatorRow(val)) continue;
+    const ym = Utils_sheetCellToYYYYMM(val);
+    if (ym === ymKey) {
+      Utils_setPreserveFormula(sh, r, CALLS_LEAD_COL, nCalls);
+      Utils_setPreserveFormula(sh, r, FORMS_LEAD_COL, nForms);
       break;
     }
   }
 }
-function run_MondayLeadsToAds_CurrentMonth(){
+function run_MondayLeadsToAds_CurrentMonth() {
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME_ADS);
   if (!sh) throw new Error(`Onglet ${SHEET_NAME_ADS} introuvable`);
 
-  const CALLS_LEAD_COL = ensureColByHeader_(sh, "Nombre d'appels lead");
-  const FORMS_LEAD_COL = ensureColByHeader_(sh, "Nombre de formulaire lead");
+  const CALLS_LEAD_COL = Utils_ensureColByHeader(sh, "Nombre d'appels lead");
+  const FORMS_LEAD_COL = Utils_ensureColByHeader(sh, "Nombre de formulaire lead");
 
   const now = new Date();
   const y = now.getUTCFullYear(), m = now.getUTCMonth();
-  const start = new Date(Date.UTC(y, m, 1, 0,0,0));
-  const end   = new Date(Date.UTC(y, m, now.getUTCDate(), 23,59,59));
-  const ymKey = start.getUTCFullYear() + '-' + String(start.getUTCMonth()+1).padStart(2,'0');
+  const start = new Date(Date.UTC(y, m, 1, 0, 0, 0));
+  const end = new Date(Date.UTC(y, m, now.getUTCDate(), 23, 59, 59));
+  const ymKey = start.getUTCFullYear() + '-' + String(start.getUTCMonth() + 1).padStart(2, '0');
 
   let nCalls = 0, nForms = 0;
   try {
     const c = mondayLeadCallsCountsByMonth_Ads_(MONDAY_LEADS_BOARD_ID, MONDAY_LEADS_COL_SOURCE, MONDAY_LEADS_COL_TYPE, MONDAY_LEADS_COL_STATUS, start, end);
     nCalls = c[ymKey] || 0;
-  } catch(e){ Logger.log('[Leads Ads Current] Calls KO: ' + e); }
+  } catch (e) { Logger.log('[Leads Ads Current] Calls KO: ' + e); }
   try {
     const f = mondayLeadFormsCountsByMonth_Ads_(MONDAY_LEADS_BOARD_ID, MONDAY_LEADS_COL_SOURCE, MONDAY_LEADS_COL_TYPE, MONDAY_LEADS_COL_STATUS, start, end);
     nForms = f[ymKey] || 0;
-  } catch(e){ Logger.log('[Leads Ads Current] Forms KO: ' + e); }
+  } catch (e) { Logger.log('[Leads Ads Current] Forms KO: ' + e); }
 
   const last = sh.getLastRow();
-  for (let r=START_ROW_ADS; r<=last; r++){
-    const val = sh.getRange(r,1).getValue();
-    if (isYearSeparatorRow_(val)) continue;
-    const ym = sheetCellToYYYYMM_(val);
-    if (ym === ymKey){
-      setPreserveFormula_(sh, r, CALLS_LEAD_COL, nCalls);
-      setPreserveFormula_(sh, r, FORMS_LEAD_COL, nForms);
+  for (let r = START_ROW_ADS; r <= last; r++) {
+    const val = sh.getRange(r, 1).getValue();
+    if (Utils_isYearSeparatorRow(val)) continue;
+    const ym = Utils_sheetCellToYYYYMM(val);
+    if (ym === ymKey) {
+      Utils_setPreserveFormula(sh, r, CALLS_LEAD_COL, nCalls);
+      Utils_setPreserveFormula(sh, r, FORMS_LEAD_COL, nForms);
       break;
     }
   }
@@ -1307,15 +1187,15 @@ function run_FormsToAds_SyncForSheet() {
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME_ADS);
   if (!sh) throw new Error(`Onglet ${SHEET_NAME_ADS} introuvable`);
 
-  const FORMS_COL = findColByHeaderAliases_(sh, [
-    "nombre de formulaire","formulaires","forms","monday forms","paperform","soumissions","submissions"
+  const FORMS_COL = Utils_findColByHeaderAliases(sh, [
+    "nombre de formulaire", "formulaires", "forms", "monday forms", "paperform", "soumissions", "submissions"
   ], HEADERS_ROW_ADS);
   if (!FORMS_COL) throw new Error(`Colonne 'Nombre de formulaire' introuvable (ligne ${HEADERS_ROW_ADS}).`);
 
   // Fenêtre forcée : Jan 2024 → fin du mois précédent (UTC côté agrégats)
   const from = FULLHIST_START_UTC;
-  const now  = new Date();
-  const to   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0, 23,59,59));
+  const now = new Date();
+  const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0, 23, 59, 59));
 
   // Récup Paperform (tolérant)
   let countsPaper = {};
@@ -1337,16 +1217,16 @@ function run_FormsToAds_SyncForSheet() {
   // Fusion = somme par mois
   const allKeys = new Set([...Object.keys(countsPaper), ...Object.keys(countsMonday)]);
   const totalCounts = {};
-  allKeys.forEach(k => totalCounts[k] = (countsPaper[k]||0) + (countsMonday[k]||0));
+  allKeys.forEach(k => totalCounts[k] = (countsPaper[k] || 0) + (countsMonday[k] || 0));
 
   // Écriture
   const last = sh.getLastRow();
   for (let r = START_ROW_ADS; r <= last; r++) {
     const cell = sh.getRange(r, 1).getValue();
-    if (isYearSeparatorRow_(cell)) continue;
-    const ym = sheetCellToYYYYMM_(cell);
+    if (Utils_isYearSeparatorRow(cell)) continue;
+    const ym = Utils_sheetCellToYYYYMM(cell);
     if (!ym) continue;
-    setPreserveFormula_(sh, r, FORMS_COL, totalCounts[ym] || 0);
+    Utils_setPreserveFormula(sh, r, FORMS_COL, totalCounts[ym] || 0);
   }
 }
 
@@ -1355,41 +1235,41 @@ function run_FormsToAds_AddLastMonth() {
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME_ADS);
   if (!sh) throw new Error(`Onglet ${SHEET_NAME_ADS} introuvable`);
 
-  const FORMS_COL = findColByHeaderAliases_(sh, [
-    "nombre de formulaire","formulaires","forms","monday forms","paperform","soumissions","submissions"
+  const FORMS_COL = Utils_findColByHeaderAliases(sh, [
+    "nombre de formulaire", "formulaires", "forms", "monday forms", "paperform", "soumissions", "submissions"
   ], HEADERS_ROW_ADS);
   if (!FORMS_COL) throw new Error(`Colonne 'Nombre de formulaire' introuvable (ligne ${HEADERS_ROW_ADS}).`);
 
   const now = new Date();
   const y = now.getUTCFullYear(), m = now.getUTCMonth();
-  const start = new Date(Date.UTC(y, m-1, 1, 0, 0, 0));
-  const end   = new Date(Date.UTC(y, m,   0, 23, 59, 59));
-  const monthKey = start.getUTCFullYear() + '-' + String(start.getUTCMonth()+1).padStart(2,'0');
+  const start = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0));
+  const end = new Date(Date.UTC(y, m, 0, 23, 59, 59));
+  const monthKey = start.getUTCFullYear() + '-' + String(start.getUTCMonth() + 1).padStart(2, '0');
 
   // Compte Paperform N-1
   let nPaper = 0;
   try {
     const c = paperformAggregateMonthlyCounts_(paperformFetchSubmissions_(PAPERFORM_FORM_ID, start, end));
     nPaper = c[monthKey] || 0;
-  } catch(e){ Logger.log('[Forms N-1] Paperform KO: ' + e); }
+  } catch (e) { Logger.log('[Forms N-1] Paperform KO: ' + e); }
 
   // Compte Monday N-1
   let nMon = 0;
   try {
     const c = mondayFetchFormCountsByMonth_(MONDAY_BOARD_ID, MONDAY_FORM_COLUMN_TITLE_GOOGLE_ADS, start, end);
     nMon = c[monthKey] || 0;
-  } catch(e){ Logger.log('[Forms N-1] Monday KO: ' + e); }
+  } catch (e) { Logger.log('[Forms N-1] Monday KO: ' + e); }
 
   const n = nPaper + nMon;
 
   // Écrire la ligne N-1
   const last = sh.getLastRow();
   for (let r = START_ROW_ADS; r <= last; r++) {
-    const val = sh.getRange(r,1).getValue();
-    if (isYearSeparatorRow_(val)) continue;
-    const ym = sheetCellToYYYYMM_(val);
+    const val = sh.getRange(r, 1).getValue();
+    if (Utils_isYearSeparatorRow(val)) continue;
+    const ym = Utils_sheetCellToYYYYMM(val);
     if (ym === monthKey) {
-      setPreserveFormula_(sh, r, FORMS_COL, n);
+      Utils_setPreserveFormula(sh, r, FORMS_COL, n);
       break;
     }
   }
@@ -1399,39 +1279,39 @@ function run_FormsToAds_CurrentMonth() {
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME_ADS);
   if (!sh) throw new Error(`Onglet ${SHEET_NAME_ADS} introuvable`);
 
-  const FORMS_COL = findColByHeaderAliases_(sh, [
-    "nombre de formulaire","formulaires","forms","monday forms","paperform","soumissions","submissions"
+  const FORMS_COL = Utils_findColByHeaderAliases(sh, [
+    "nombre de formulaire", "formulaires", "forms", "monday forms", "paperform", "soumissions", "submissions"
   ], HEADERS_ROW_ADS);
   if (!FORMS_COL) throw new Error(`Colonne 'Nombre de formulaire' introuvable (ligne ${HEADERS_ROW_ADS}).`);
 
   const now = new Date();
   const startLocal = new Date(now.getFullYear(), now.getMonth(), 1);
-  const endLocal   = now;
-  const monthKey   = Utilities.formatDate(startLocal, Session.getScriptTimeZone(), 'yyyy-MM');
+  const endLocal = now;
+  const monthKey = Utilities.formatDate(startLocal, Session.getScriptTimeZone(), 'yyyy-MM');
 
-  const fromUTC = new Date(Date.UTC(startLocal.getFullYear(), startLocal.getMonth(), 1, 0,0,0));
-  const toUTC   = new Date(Date.UTC(endLocal.getFullYear(),   endLocal.getMonth(),   endLocal.getDate(), 23,59,59));
+  const fromUTC = new Date(Date.UTC(startLocal.getFullYear(), startLocal.getMonth(), 1, 0, 0, 0));
+  const toUTC = new Date(Date.UTC(endLocal.getFullYear(), endLocal.getMonth(), endLocal.getDate(), 23, 59, 59));
 
   let nPaper = 0, nMon = 0;
   try {
     const c = paperformAggregateMonthlyCounts_(paperformFetchSubmissions_(PAPERFORM_FORM_ID, fromUTC, toUTC));
     nPaper = c[monthKey] || 0;
-  } catch(e){ Logger.log('[Forms Current] Paperform KO: ' + e); }
+  } catch (e) { Logger.log('[Forms Current] Paperform KO: ' + e); }
 
   try {
     const c = mondayFetchFormCountsByMonth_(MONDAY_BOARD_ID, MONDAY_FORM_COLUMN_TITLE_GOOGLE_ADS, fromUTC, toUTC);
     nMon = c[monthKey] || 0;
-  } catch(e){ Logger.log('[Forms Current] Monday KO: ' + e); }
+  } catch (e) { Logger.log('[Forms Current] Monday KO: ' + e); }
 
   const n = nPaper + nMon;
 
   const last = sh.getLastRow();
   for (let r = START_ROW_ADS; r <= last; r++) {
-    const val = sh.getRange(r,1).getValue();
-    if (isYearSeparatorRow_(val)) continue;
-    const ym = sheetCellToYYYYMM_(val);
+    const val = sh.getRange(r, 1).getValue();
+    if (Utils_isYearSeparatorRow(val)) continue;
+    const ym = Utils_sheetCellToYYYYMM(val);
     if (ym === monthKey) {
-      setPreserveFormula_(sh, r, FORMS_COL, n);
+      Utils_setPreserveFormula(sh, r, FORMS_COL, n);
       break;
     }
   }
@@ -1441,7 +1321,7 @@ function run_FormsToAds_CurrentMonth() {
 /**************************** MATOMO → "Durée moyenne visite" ****************************/
 
 const MATOMO_BASE_URL = 'https://matomo.aleo.agency';
-const MATOMO_SITE_ID  = 1492;
+const MATOMO_SITE_ID = 1492;
 const MATOMO_PAGE_PATTERN = 'lp-ga-';   // motif "contient"
 
 function getMatomoToken_() {
@@ -1453,19 +1333,19 @@ function getMatomoToken_() {
 function monthCellToYYYYMM_(cell) {
   if (Object.prototype.toString.call(cell) === '[object Date]' && !isNaN(cell.getTime())) {
     const y = cell.getFullYear(), m = cell.getMonth() + 1;
-    return `${y}-${String(m).padStart(2,'0')}`;
+    return `${y}-${String(m).padStart(2, '0')}`;
   }
   const s = String(cell || '').trim();
   if (!s) return null;
   let m;
-  if (m = s.match(/^(\d{4})-(\d{1,2})$/))   return `${m[1]}-${String(+m[2]).padStart(2,'0')}`;
-  if (m = s.match(/^(\d{4})\/(\d{1,2})$/))  return `${m[1]}-${String(+m[2]).padStart(2,'0')}`;
-  if (m = s.match(/^(\d{4})(\d{2})$/))      return `${m[1]}-${m[2]}`;
+  if (m = s.match(/^(\d{4})-(\d{1,2})$/)) return `${m[1]}-${String(+m[2]).padStart(2, '0')}`;
+  if (m = s.match(/^(\d{4})\/(\d{1,2})$/)) return `${m[1]}-${String(+m[2]).padStart(2, '0')}`;
+  if (m = s.match(/^(\d{4})(\d{2})$/)) return `${m[1]}-${m[2]}`;
   if (m = s.match(/^(\d{4})-(\d{2})-\d{2}$/)) return `${m[1]}-${m[2]}`;
   const d = new Date(s);
   if (!isNaN(d.getTime())) {
     const y = d.getFullYear(), mm = d.getMonth() + 1;
-    return `${y}-${String(mm).padStart(2,'0')}`;
+    return `${y}-${String(mm).padStart(2, '0')}`;
   }
   return null;
 }
@@ -1479,7 +1359,7 @@ function matomoFetch_(params) {
   const code = res.getResponseCode();
   if (code >= 300) throw new Error(`Matomo HTTP ${code}: ${res.getContentText()}`);
   try { return JSON.parse(res.getContentText()); }
-  catch(e){ throw new Error('Matomo JSON parse error: ' + e + ' body=' + res.getContentText().slice(0, 400)); }
+  catch (e) { throw new Error('Matomo JSON parse error: ' + e + ' body=' + res.getContentText().slice(0, 400)); }
 }
 
 function matomoFetchVisitAvgSecondsWithSegment_(monthYYYYMM) {
@@ -1490,9 +1370,9 @@ function matomoFetchVisitAvgSecondsWithSegment_(monthYYYYMM) {
     const direct = Number(js.avg_time_on_site);
     if (!isNaN(direct)) return { secs: direct, via: 'VisitsSummary+segment' };
     const sum = Number(js.sum_visit_length), nb = Number(js.nb_visits);
-    if (!isNaN(sum) && nb > 0) return { secs: sum/nb, via: 'VisitsSummary+segment' };
+    if (!isNaN(sum) && nb > 0) return { secs: sum / nb, via: 'VisitsSummary+segment' };
   }
-    if (js && typeof js === 'object' && !Array.isArray(js)) {
+  if (js && typeof js === 'object' && !Array.isArray(js)) {
 
     const node = js[`${monthYYYYMM}-01`] || js[monthYYYYMM];
     if (node) {
@@ -1501,7 +1381,7 @@ function matomoFetchVisitAvgSecondsWithSegment_(monthYYYYMM) {
       }
       if (node.sum_visit_length != null && node.nb_visits != null) {
         const sum = Number(node.sum_visit_length), nb = Number(node.nb_visits);
-        if (!isNaN(sum) && nb > 0) return { secs: sum/nb, via: 'VisitsSummary+segment' };
+        if (!isNaN(sum) && nb > 0) return { secs: sum / nb, via: 'VisitsSummary+segment' };
       }
     }
   }
@@ -1513,7 +1393,7 @@ function matomoFetchVisitAvgSecondsWithSegment_(monthYYYYMM) {
       }
       if (row.sum_visit_length != null && row.nb_visits != null) {
         const sum = Number(row.sum_visit_length), nb = Number(row.nb_visits);
-        if (!isNaN(sum) && nb > 0) return { secs: sum/nb, via: 'VisitsSummary+segment' };
+        if (!isNaN(sum) && nb > 0) return { secs: sum / nb, via: 'VisitsSummary+segment' };
       }
     }
   }
@@ -1557,17 +1437,17 @@ function run_MatomoToAds_SyncForSheet() {
   if (last < START_ROW_ADS) return;
 
   // Trouve la colonne par en-tête
-  const MATOMO_COL = findColByHeaderAliases_(sh, ['duree moyenne visite','durée moyenne visite'], HEADERS_ROW_ADS);
+  const MATOMO_COL = Utils_findColByHeaderAliases(sh, ['duree moyenne visite', 'durée moyenne visite'], HEADERS_ROW_ADS);
   if (!MATOMO_COL) throw new Error(`Colonne 'Durée moyenne visite' introuvable (ligne ${HEADERS_ROW_ADS}).`);
 
   for (let r = START_ROW_ADS; r <= last; r++) {
     const cell = sh.getRange(r, 1).getValue();
-    if (isYearSeparatorRow_(cell)) continue;
-    const ym = sheetCellToYYYYMM_(cell);
+    if (Utils_isYearSeparatorRow(cell)) continue;
+    const ym = Utils_sheetCellToYYYYMM(cell);
     if (!ym) continue;
 
     const { secs, via } = matomoResolveAvgSeconds_(ym);
-    setSecondsAsDuration_(sh, r, MATOMO_COL, secs);
+    Utils_setSecondsAsDuration(sh, r, MATOMO_COL, secs);
     Logger.log(`[Matomo] ${ym}: ${secs.toFixed(2)} sec via ${via}`);
     Utilities.sleep(120);
   }
@@ -1578,20 +1458,20 @@ function run_MatomoToAds_AddLastMonth() {
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME_ADS);
   if (!sh) throw new Error(`Onglet ${SHEET_NAME_ADS} introuvable`);
 
-  const MATOMO_COL = findColByHeaderAliases_(sh, ['duree moyenne visite','durée moyenne visite'], HEADERS_ROW_ADS);
+  const MATOMO_COL = Utils_findColByHeaderAliases(sh, ['duree moyenne visite', 'durée moyenne visite'], HEADERS_ROW_ADS);
   if (!MATOMO_COL) throw new Error(`Colonne 'Durée moyenne visite' introuvable (ligne ${HEADERS_ROW_ADS}).`);
 
   const today = new Date();
-  const monthKey = Utilities.formatDate(new Date(today.getFullYear(), today.getMonth()-1, 1), Session.getScriptTimeZone(), 'yyyy-MM');
+  const monthKey = Utilities.formatDate(new Date(today.getFullYear(), today.getMonth() - 1, 1), Session.getScriptTimeZone(), 'yyyy-MM');
 
   const last = sh.getLastRow();
   for (let r = START_ROW_ADS; r <= last; r++) {
-    const val = sh.getRange(r,1).getValue();
-    if (isYearSeparatorRow_(val)) continue;
-    const ym = sheetCellToYYYYMM_(val);
+    const val = sh.getRange(r, 1).getValue();
+    if (Utils_isYearSeparatorRow(val)) continue;
+    const ym = Utils_sheetCellToYYYYMM(val);
     if (ym === monthKey) {
       const { secs, via } = matomoResolveAvgSeconds_(monthKey);
-      setSecondsAsDuration_(sh, r, MATOMO_COL, secs);
+      Utils_setSecondsAsDuration(sh, r, MATOMO_COL, secs);
       Logger.log(`[Matomo] ${monthKey}: ${secs.toFixed(2)} sec via ${via}`);
       break;
     }
@@ -1601,7 +1481,7 @@ function run_MatomoToAds_CurrentMonth() {
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME_ADS);
   if (!sh) throw new Error(`Onglet ${SHEET_NAME_ADS} introuvable`);
 
-  const MATOMO_COL = findColByHeaderAliases_(sh, ['duree moyenne visite','durée moyenne visite'], HEADERS_ROW_ADS);
+  const MATOMO_COL = Utils_findColByHeaderAliases(sh, ['duree moyenne visite', 'durée moyenne visite'], HEADERS_ROW_ADS);
   if (!MATOMO_COL) throw new Error(`Colonne 'Durée moyenne visite' introuvable (ligne ${HEADERS_ROW_ADS}).`);
 
   const today = new Date();
@@ -1609,12 +1489,12 @@ function run_MatomoToAds_CurrentMonth() {
 
   const last = sh.getLastRow();
   for (let r = START_ROW_ADS; r <= last; r++) {
-    const val = sh.getRange(r,1).getValue();
-    if (isYearSeparatorRow_(val)) continue;
-    const ym = sheetCellToYYYYMM_(val);
+    const val = sh.getRange(r, 1).getValue();
+    if (Utils_isYearSeparatorRow(val)) continue;
+    const ym = Utils_sheetCellToYYYYMM(val);
     if (ym === monthKey) {
       const { secs, via } = matomoResolveAvgSeconds_(monthKey);
-      setSecondsAsDuration_(sh, r, MATOMO_COL, secs);
+      Utils_setSecondsAsDuration(sh, r, MATOMO_COL, secs);
       Logger.log(`[Matomo Current] ${monthKey}: ${secs.toFixed(2)} sec via ${via}`);
       break;
     }
@@ -1626,31 +1506,31 @@ function run_GAds_CurrentMonth() {
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME_ADS);
   if (!sh) throw new Error(`Onglet ${SHEET_NAME_ADS} introuvable`);
 
-  const moisCol   = findColByHeaderAliases_(sh, ['mois'], HEADERS_ROW_ADS);
-  const budgetCol = findColByHeaderAliases_(sh, ['budget investi','depenses','depense','cout','coût','spend','cost'], HEADERS_ROW_ADS);
-  const impCol    = findColByHeaderAliases_(sh, ['impressions','nb impressions','nombre dimpressions','nombre d impressions'], HEADERS_ROW_ADS);
-  const clkCol    = findColByHeaderAliases_(sh, ['clics','clicks','nb clics','nombre de clics'], HEADERS_ROW_ADS);
-  const ctrCol    = findColByHeaderAliases_(sh, ['ctr','taux de clics','click through rate'], HEADERS_ROW_ADS);
-  const cpcCol    = findColByHeaderAliases_(sh, ['cpc','cout par clic','coût par clic','cost per click'], HEADERS_ROW_ADS);
-  const callsCol  = findColByHeaderAliases_(sh, ['appels google ads','appels','calls','nombre dappels'], HEADERS_ROW_ADS);
+  const moisCol = Utils_findColByHeaderAliases(sh, ['mois'], HEADERS_ROW_ADS);
+  const budgetCol = Utils_findColByHeaderAliases(sh, ['budget investi', 'depenses', 'depense', 'cout', 'coût', 'spend', 'cost'], HEADERS_ROW_ADS);
+  const impCol = Utils_findColByHeaderAliases(sh, ['impressions', 'nb impressions', 'nombre dimpressions', 'nombre d impressions'], HEADERS_ROW_ADS);
+  const clkCol = Utils_findColByHeaderAliases(sh, ['clics', 'clicks', 'nb clics', 'nombre de clics'], HEADERS_ROW_ADS);
+  const ctrCol = Utils_findColByHeaderAliases(sh, ['ctr', 'taux de clics', 'click through rate'], HEADERS_ROW_ADS);
+  const cpcCol = Utils_findColByHeaderAliases(sh, ['cpc', 'cout par clic', 'coût par clic', 'cost per click'], HEADERS_ROW_ADS);
+  const callsCol = Utils_findColByHeaderAliases(sh, ['appels google ads', 'appels', 'calls', 'nombre dappels'], HEADERS_ROW_ADS);
 
   const missing = [];
-  if (!moisCol)   missing.push('Mois');
+  if (!moisCol) missing.push('Mois');
   if (!budgetCol) missing.push('Budget investi');
-  if (!impCol)    missing.push('Impressions');
-  if (!clkCol)    missing.push('Clics');
-  if (!ctrCol)    missing.push('CTR');
-  if (!cpcCol)    missing.push('CPC');
+  if (!impCol) missing.push('Impressions');
+  if (!clkCol) missing.push('Clics');
+  if (!ctrCol) missing.push('CTR');
+  if (!cpcCol) missing.push('CPC');
   if (missing.length) throw new Error('[GAds CurrentMonth] Colonnes manquantes: ' + missing.join(', '));
 
   const today = new Date();
   const start = new Date(today.getFullYear(), today.getMonth(), 1);
-  const end   = today; // jusqu’à aujourd’hui
+  const end = today; // jusqu’à aujourd’hui
   const ymKey = Utilities.formatDate(start, Session.getScriptTimeZone(), 'yyyy-MM');
 
   const data = fetchGoogleAdsMonthly(
     Utilities.formatDate(start, Session.getScriptTimeZone(), 'yyyy-MM-dd'),
-    Utilities.formatDate(end,   Session.getScriptTimeZone(), 'yyyy-MM-dd')
+    Utilities.formatDate(end, Session.getScriptTimeZone(), 'yyyy-MM-dd')
   );
   const byMonth = aggregateAdsByMonth_(data);
   const v = byMonth[ymKey];
@@ -1663,17 +1543,17 @@ function run_GAds_CurrentMonth() {
 
   const moisCell = sh.getRange(row, moisCol);
   if (!moisCell.getFormula()) {
-    moisCell.setValue(monthKeyToFr_(ymKey));
+    moisCell.setValue(Utils_monthKeyToFr(ymKey));
   } else {
     Logger.log(`[SKIP] Préserve formule en ${moisCell.getA1Notation()}`);
   }
 
-  setPreserveFormula_(sh, row, budgetCol, v.cost, '0.00');
-  setPreserveFormula_(sh, row, impCol,    v.impressions, null);
-  setPreserveFormula_(sh, row, clkCol,    v.clicks, null);
-  if (ctrCol) setPreserveFormula_(sh, row, ctrCol, v.ctr, '0.00%');
-  if (cpcCol) setPreserveFormula_(sh, row, cpcCol, v.cpc, '0.00');
-  if (callsCol) setPreserveFormula_(sh, row, callsCol, v.calls || 0, null);
+  Utils_setPreserveFormula(sh, row, budgetCol, v.cost, '0.00');
+  Utils_setPreserveFormula(sh, row, impCol, v.impressions, null);
+  Utils_setPreserveFormula(sh, row, clkCol, v.clicks, null);
+  if (ctrCol) Utils_setPreserveFormula(sh, row, ctrCol, v.ctr, '0.00%');
+  if (cpcCol) Utils_setPreserveFormula(sh, row, cpcCol, v.cpc, '0.00');
+  if (callsCol) Utils_setPreserveFormula(sh, row, callsCol, v.calls || 0, null);
 
   Logger.log(`[GAds CurrentMonth] ${ymKey} -> cost=${v.cost}, imp=${v.impressions}, clk=${v.clicks}, ctr=${v.ctr}, cpc=${v.cpc}`);
 }

@@ -1,71 +1,28 @@
 /**************************** GBM (Business Profile) ****************************/
 
-const SHEET_NAME   = 'GMB';                 // nom de l’onglet GBM
-const HEADERS_ROW  = 3;                     // ligne des entêtes
-const START_ROW    = 6;                     // première ligne de données
+const SHEET_NAME = 'GMB';                 // nom de l’onglet GBM
+const HEADERS_ROW = 3;                     // ligne des entêtes
+const START_ROW = 6;                     // première ligne de données
 const LOCATION_NAME = 'locations/17344379108514631991'; // ID de fiche GBM
 
 // Metrics dispo via l’API Business Profile Performance
 const METRICS = {
   'BUSINESS_IMPRESSIONS_DESKTOP_SEARCH': 'Vues recherche Google Ordinateur',
-  'BUSINESS_IMPRESSIONS_MOBILE_SEARCH':  'Vues recherche Google Mobile',
-  'BUSINESS_IMPRESSIONS_DESKTOP_MAPS':   'Vues Google Maps Ordinateur',
-  'BUSINESS_IMPRESSIONS_MOBILE_MAPS':    'Vues Google Maps Mobile',
-  'WEBSITE_CLICKS':                      'Clics site web',
-  'CALL_CLICKS':                         'Appels',
-  'BUSINESS_DIRECTION_REQUESTS':         'Demande d\'itinéraire'
+  'BUSINESS_IMPRESSIONS_MOBILE_SEARCH': 'Vues recherche Google Mobile',
+  'BUSINESS_IMPRESSIONS_DESKTOP_MAPS': 'Vues Google Maps Ordinateur',
+  'BUSINESS_IMPRESSIONS_MOBILE_MAPS': 'Vues Google Maps Mobile',
+  'WEBSITE_CLICKS': 'Clics site web',
+  'CALL_CLICKS': 'Appels',
+  'BUSINESS_DIRECTION_REQUESTS': 'Demande d\'itinéraire'
 };
 
-/* ---------- Helpers entêtes/format ---------- */
-function _normHeader_(s){
-  return String(s||'').toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .replace(/[’'`]/g,'')
-    .replace(/\s+/g,' ')
-    .trim();
-}
-function findColByHeaderAliases_(sheet, aliases, headerRow){
-  const row = headerRow || HEADERS_ROW;
-  const headers = sheet.getRange(row, 1, 1, sheet.getLastColumn()).getValues()[0]||[];
-  const HN = headers.map(_normHeader_);
-  const wanted = aliases.map(_normHeader_);
-  for (let i=0;i<HN.length;i++){
-    const h = HN[i]; if (!h) continue;
-    if (wanted.some(w=>h===w || h.includes(w))) return i+1;
-  }
-  return 0;
-}
-function isYearSeparatorRow_(cell) {
-  if (cell == null) return false;
-  if (Object.prototype.toString.call(cell) === '[object Date]' && !isNaN(cell.getTime())) return false;
-  const s = String(cell).trim();
-  if (/^\d{4}$/.test(s)) {
-    const y = +s; return y>=1900 && y<=2100;
-  }
-  if (typeof cell === 'number' && isFinite(cell)) {
-    const y = Math.round(cell); return y>=1900 && y<=2100;
-  }
-  return false;
-}
-function sheetCellToYYYYMM_(cell) {
-  if (Object.prototype.toString.call(cell) === '[object Date]' && !isNaN(cell.getTime())) {
-    const y = cell.getFullYear(), m = cell.getMonth()+1;
-    return `${y}-${String(m).padStart(2,'0')}`;
-  }
-  const raw = String(cell || '').trim();
-  if (!raw) return null;
-  let m;
-  if ((m = raw.match(/^(\d{4})-(\d{1,2})$/)))    return `${m[1]}-${String(+m[2]).padStart(2,'0')}`;
-  if ((m = raw.match(/^(\d{4})\/(\d{1,2})$/)))   return `${m[1]}-${String(+m[2]).padStart(2,'0')}`;
-  if ((m = raw.match(/^(\d{4})(\d{2})$/)))       return `${m[1]}-${m[2]}`;
-  if ((m = raw.match(/^(\d{4})-(\d{2})-\d{2}$/)))return `${m[1]}-${m[2]}`;
-  const d = new Date(raw);
-  if (!isNaN(d.getTime())) {
-    const y = d.getFullYear(), mo = d.getMonth()+1;
-    return `${y}-${String(mo).padStart(2,'0')}`;
-  }
-  return null;
-}
+/**************************** HELPERS GÉNÉRAUX (Utilise Utils.js) ****************************/
+// Les fonctions suivantes sont maintenant dans Utils.js :
+// Utils_normHeader -> Utils_normHeader
+// Utils_findColByHeaderAliases -> Utils_findColByHeaderAliases
+// Utils_isYearSeparatorRow -> Utils_isYearSeparatorRow
+// Utils_sheetCellToYYYYMM -> Utils_sheetCellToYYYYMM
+// Utils_executeWithRetry -> Utils_executeWithRetry
 function _gbmStyleYearRow_(sh, row, moisCol) {
   sh.getRange(row, 1, 1, sh.getLastColumn()).setBackground('#e6e1f5');
   sh.getRange(row, moisCol).setFontWeight('bold');
@@ -73,17 +30,17 @@ function _gbmStyleYearRow_(sh, row, moisCol) {
 
 // VRAI si la colonne est listée comme ayant une formule dans Sheet_Structures.md
 function GMB_isProtectedHeader_(sh, col) {
-    if (!col) return false;
-    const headerVal = sh.getRange(HEADERS_ROW, col).getValue();
-    const h = _normHeader_(headerVal);
+  if (!col) return false;
+  const headerVal = sh.getRange(HEADERS_ROW, col).getValue();
+  const h = Utils_normHeader(headerVal);
 
-    // Liste EXACTE des colonnes avec formules pour "GMB"
-    const protectedHeaders = [
-        'nombre de signature', 'total montant signe', 'montant moyen signature'
-    ].map(_normHeader_);
+  // Liste EXACTE des colonnes avec formules pour "GMB"
+  const protectedHeaders = [
+    'nombre de signature', 'total montant signe', 'montant moyen signature'
+  ].map(Utils_normHeader);
 
-    // La protection est active si le nom de colonne est dans la liste.
-    return protectedHeaders.some(p => h.includes(p));
+  // La protection est active si le nom de colonne est dans la liste.
+  return protectedHeaders.some(p => h.includes(p));
 }
 
 /* ---------- OAuth ---------- */
@@ -108,25 +65,7 @@ function authCallback(request) {
   return HtmlService.createHtmlOutput(ok ? 'Success!' : 'Denied.');
 }
 
-/* ---------- Retry/backoff générique ---------- */
-function executeWithRetry_(fn, label, maxRetries) {
-  label = label || 'task'; maxRetries = maxRetries || 3;
-  let attempt = 0, lastErr;
-  while (attempt < maxRetries) {
-    try {
-      attempt++;
-      const out = fn();
-      return out;
-    } catch (err) {
-      lastErr = err;
-      const msg = String(err && err.message || err);
-      const retryable = /(^|\s)(429|5\d\d|RATE_LIMIT|RESOURCE_EXHAUSTED)/i.test(msg);
-      if (attempt >= maxRetries || !retryable) break;
-      Utilities.sleep(Math.pow(2, attempt) * 1000); // 2s, 4s, 8s
-    }
-  }
-  throw lastErr;
-}
+// Utils_executeWithRetry est maintenant dans Utils.js
 
 /* ---------- API BPP (performance) ---------- */
 function fetchDailyMetrics_(locationName, startDate, endDate) {
@@ -137,10 +76,10 @@ function fetchDailyMetrics_(locationName, startDate, endDate) {
   const metrics = Object.keys(METRICS);
   const qs = metrics.map(m => `dailyMetrics=${encodeURIComponent(m)}`).join('&')
     + `&dailyRange.startDate.year=${startDate.getFullYear()}`
-    + `&dailyRange.startDate.month=${startDate.getMonth()+1}`
+    + `&dailyRange.startDate.month=${startDate.getMonth() + 1}`
     + `&dailyRange.startDate.day=${startDate.getDate()}`
     + `&dailyRange.endDate.year=${endDate.getFullYear()}`
-    + `&dailyRange.endDate.month=${endDate.getMonth()+1}`
+    + `&dailyRange.endDate.month=${endDate.getMonth() + 1}`
     + `&dailyRange.endDate.day=${endDate.getDate()}`;
 
   const url = `${base}/${locationName}:fetchMultiDailyMetricsTimeSeries?${qs}`;
@@ -171,7 +110,7 @@ function aggregateByMonth_(responseJson) {
         const y = d && d.year, m = d && d.month, day = d && d.day;
         if (!y || !m || !day) return;
 
-        const key = `${y}-${String(m).padStart(2,'0')}`;
+        const key = `${y}-${String(m).padStart(2, '0')}`;
         const val = Number(p.value || 0);
         if (!out[key]) out[key] = {};
         out[key][metric] = (out[key][metric] || 0) + val;
@@ -224,7 +163,7 @@ function _parseStarRating_(rev) {
     if (typeof v === 'string') {
       const t = v.trim();
       if (/^\d+(\.\d+)?$/.test(t)) return parseFloat(t);
-      const map = { ONE:1, TWO:2, THREE:3, FOUR:4, FIVE:5 };
+      const map = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5 };
       const up = t.toUpperCase();
       if (map[up]) return map[up];
     }
@@ -244,7 +183,7 @@ function fetchReviewsMonthly_(startDate, endDate) {
   let pageToken = '', done = false;
 
   const fromTs = startDate.getTime();
-  const toTs   = endDate.getTime();
+  const toTs = endDate.getTime();
 
   const bucket = {}; // {ym:{sum, count}}
 
@@ -274,9 +213,9 @@ function fetchReviewsMonthly_(startDate, endDate) {
       // comme on trie desc, si on dépasse la borne inférieure on peut s'arrêter plus tard, mais on continue simple
       if (ts < fromTs || ts > toTs) continue;
 
-      const ym = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+      const ym = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
       const star = _parseStarRating_(r);
-      if (!bucket[ym]) bucket[ym] = { sum:0, count:0 };
+      if (!bucket[ym]) bucket[ym] = { sum: 0, count: 0 };
       if (!isNaN(star)) bucket[ym].sum += star;
       bucket[ym].count += 1;
     }
@@ -296,8 +235,8 @@ function fetchReviewsMonthly_(startDate, endDate) {
 
 /* ---------- Placement intelligent (lignes “année” + mois) ---------- */
 function _gbmFindOrInsertMonthRow_(sh, moisCol, targetYM) {
-  const targetYear = parseInt(targetYM.slice(0,4), 10);
-  const lastRow = Math.max(sh.getLastRow(), START_ROW-1);
+  const targetYear = parseInt(targetYM.slice(0, 4), 10);
+  const lastRow = Math.max(sh.getLastRow(), START_ROW - 1);
 
   if (lastRow < START_ROW) {
     sh.insertRowsBefore(START_ROW, 2);
@@ -312,7 +251,7 @@ function _gbmFindOrInsertMonthRow_(sh, moisCol, targetYM) {
 
   for (let r = START_ROW; r <= sh.getLastRow(); r++) {
     const v = sh.getRange(r, moisCol).getValue();
-    if (isYearSeparatorRow_(v)) {
+    if (Utils_isYearSeparatorRow(v)) {
       const y = parseInt(String(v).trim(), 10);
       if (yearRowForTarget === null && y === targetYear) yearRowForTarget = r;
       if (nextYearRowAfterTarget === null && y > targetYear && yearRowForTarget !== null) {
@@ -320,16 +259,16 @@ function _gbmFindOrInsertMonthRow_(sh, moisCol, targetYM) {
       }
       continue;
     }
-    const ym = sheetCellToYYYYMM_(v);
+    const ym = Utils_sheetCellToYYYYMM(v);
     if (ym === targetYM) { existingMonthRow = r; break; }
   }
   if (existingMonthRow) return existingMonthRow;
 
   if (yearRowForTarget !== null) {
     const blockStart = yearRowForTarget + 1;
-    const blockEnd = (nextYearRowAfterTarget ? nextYearRowAfterTarget : (sh.getLastRow()+1)) - 1;
+    const blockEnd = (nextYearRowAfterTarget ? nextYearRowAfterTarget : (sh.getLastRow() + 1)) - 1;
     for (let r = blockStart; r <= blockEnd; r++) {
-      const ym = sheetCellToYYYYMM_(sh.getRange(r, moisCol).getValue());
+      const ym = Utils_sheetCellToYYYYMM(sh.getRange(r, moisCol).getValue());
       if (ym && ym > targetYM) { sh.insertRowsBefore(r, 1); return r; }
     }
     const insertAt = blockEnd + 1;
@@ -340,12 +279,12 @@ function _gbmFindOrInsertMonthRow_(sh, moisCol, targetYM) {
   let firstGreaterYearRow = null;
   for (let r = START_ROW; r <= sh.getLastRow(); r++) {
     const v = sh.getRange(r, moisCol).getValue();
-    if (isYearSeparatorRow_(v)) {
+    if (Utils_isYearSeparatorRow(v)) {
       const y = parseInt(String(v).trim(), 10);
       if (y > targetYear) { firstGreaterYearRow = r; break; }
     }
   }
-  const yearRow = firstGreaterYearRow ? firstGreaterYearRow : (sh.getLastRow()+1);
+  const yearRow = firstGreaterYearRow ? firstGreaterYearRow : (sh.getLastRow() + 1);
   sh.insertRowsBefore(yearRow, 2);
   sh.getRange(yearRow, moisCol).setValue(String(targetYear));
   _gbmStyleYearRow_(sh, yearRow, moisCol);
@@ -354,52 +293,52 @@ function _gbmFindOrInsertMonthRow_(sh, moisCol, targetYM) {
 
 /* ---------- Écriture d’une ligne mois (détection par entêtes) ---------- */
 function writeGBMRowAt_(sh, rowIndex, monthKey, metrics, reviewsAgg) {
-  const moisCol = findColByHeaderAliases_(sh, ['mois']);
-  const vuesCol = findColByHeaderAliases_(sh, ['vues']);
-  const clicsCol = findColByHeaderAliases_(sh, ['clics site web','clics']);
-  const itinCol = findColByHeaderAliases_(sh, ['demande ditineraire','demande d itineraire','itineraire']);
-  const appelsCol = findColByHeaderAliases_(sh, ['appels']);
-  const tauxIntCol = findColByHeaderAliases_(sh, ['taux dinteraction','taux interaction']);
-  const tauxAppelCol = findColByHeaderAliases_(sh, ['taux dappel','taux appel']);
-  const avisNbCol = findColByHeaderAliases_(sh, ['nombre davis','nombre d avis','nb avis']);
-  const avisScoreCol = findColByHeaderAliases_(sh, ['score avis']);
-  const mapsMobCol = findColByHeaderAliases_(sh, ['vues google maps mobile','maps mobile']);
-  const mapsDeskCol= findColByHeaderAliases_(sh, ['vues google maps ordinateur','maps ordinateur','maps desktop']);
-  const srchMobCol = findColByHeaderAliases_(sh, ['vues recherche google mobile','recherche mobile','search mobile']);
-  const srchDeskCol= findColByHeaderAliases_(sh, ['vues recherche google ordinateur','recherche ordinateur','search desktop']);
+  const moisCol = Utils_findColByHeaderAliases(sh, ['mois']);
+  const vuesCol = Utils_findColByHeaderAliases(sh, ['vues']);
+  const clicsCol = Utils_findColByHeaderAliases(sh, ['clics site web', 'clics']);
+  const itinCol = Utils_findColByHeaderAliases(sh, ['demande ditineraire', 'demande d itineraire', 'itineraire']);
+  const appelsCol = Utils_findColByHeaderAliases(sh, ['appels']);
+  const tauxIntCol = Utils_findColByHeaderAliases(sh, ['taux dinteraction', 'taux interaction']);
+  const tauxAppelCol = Utils_findColByHeaderAliases(sh, ['taux dappel', 'taux appel']);
+  const avisNbCol = Utils_findColByHeaderAliases(sh, ['nombre davis', 'nombre d avis', 'nb avis']);
+  const avisScoreCol = Utils_findColByHeaderAliases(sh, ['score avis']);
+  const mapsMobCol = Utils_findColByHeaderAliases(sh, ['vues google maps mobile', 'maps mobile']);
+  const mapsDeskCol = Utils_findColByHeaderAliases(sh, ['vues google maps ordinateur', 'maps ordinateur', 'maps desktop']);
+  const srchMobCol = Utils_findColByHeaderAliases(sh, ['vues recherche google mobile', 'recherche mobile', 'search mobile']);
+  const srchDeskCol = Utils_findColByHeaderAliases(sh, ['vues recherche google ordinateur', 'recherche ordinateur', 'search desktop']);
 
-  const vues = (metrics['BUSINESS_IMPRESSIONS_DESKTOP_SEARCH']||0)
-             + (metrics['BUSINESS_IMPRESSIONS_MOBILE_SEARCH']||0)
-             + (metrics['BUSINESS_IMPRESSIONS_DESKTOP_MAPS']||0)
-             + (metrics['BUSINESS_IMPRESSIONS_MOBILE_MAPS']||0);
-  const clics = metrics['WEBSITE_CLICKS']||0;
-  const appels= metrics['CALL_CLICKS']||0;
-  const itin  = metrics['BUSINESS_DIRECTION_REQUESTS']||0;
+  const vues = (metrics['BUSINESS_IMPRESSIONS_DESKTOP_SEARCH'] || 0)
+    + (metrics['BUSINESS_IMPRESSIONS_MOBILE_SEARCH'] || 0)
+    + (metrics['BUSINESS_IMPRESSIONS_DESKTOP_MAPS'] || 0)
+    + (metrics['BUSINESS_IMPRESSIONS_MOBILE_MAPS'] || 0);
+  const clics = metrics['WEBSITE_CLICKS'] || 0;
+  const appels = metrics['CALL_CLICKS'] || 0;
+  const itin = metrics['BUSINESS_DIRECTION_REQUESTS'] || 0;
 
-  const tauxInteraction = vues ? ( (clics + appels + itin) / vues ) : 0;
-  const tauxAppel       = vues ? ( appels / vues ) : 0;
+  const tauxInteraction = vues ? ((clics + appels + itin) / vues) : 0;
+  const tauxAppel = vues ? (appels / vues) : 0;
 
-  if (!GMB_isProtectedHeader_(sh, moisCol)) setPreserveFormula_(sh, rowIndex, moisCol, monthKey);
-  if (!GMB_isProtectedHeader_(sh, vuesCol)) setPreserveFormula_(sh, rowIndex, vuesCol, vues);
-  if (!GMB_isProtectedHeader_(sh, clicsCol)) setPreserveFormula_(sh, rowIndex, clicsCol, clics);
-  if (!GMB_isProtectedHeader_(sh, itinCol)) setPreserveFormula_(sh, rowIndex, itinCol, itin);
-  if (!GMB_isProtectedHeader_(sh, appelsCol)) setPreserveFormula_(sh, rowIndex, appelsCol, appels);
+  if (!GMB_isProtectedHeader_(sh, moisCol)) Utils_setPreserveFormula(sh, rowIndex, moisCol, monthKey);
+  if (!GMB_isProtectedHeader_(sh, vuesCol)) Utils_setPreserveFormula(sh, rowIndex, vuesCol, vues);
+  if (!GMB_isProtectedHeader_(sh, clicsCol)) Utils_setPreserveFormula(sh, rowIndex, clicsCol, clics);
+  if (!GMB_isProtectedHeader_(sh, itinCol)) Utils_setPreserveFormula(sh, rowIndex, itinCol, itin);
+  if (!GMB_isProtectedHeader_(sh, appelsCol)) Utils_setPreserveFormula(sh, rowIndex, appelsCol, appels);
 
   // Avis (par mois) si reviewsAgg fourni
   if (reviewsAgg && (avisNbCol || avisScoreCol)) {
     const r = reviewsAgg[monthKey];
     if (r) {
-      if (!GMB_isProtectedHeader_(sh, avisNbCol)) setPreserveFormula_(sh, rowIndex, avisNbCol, r.count);
-      if (!GMB_isProtectedHeader_(sh, avisScoreCol)) setPreserveFormula_(sh, rowIndex, avisScoreCol, r.avg, '0.00');
+      if (!GMB_isProtectedHeader_(sh, avisNbCol)) Utils_setPreserveFormula(sh, rowIndex, avisNbCol, r.count);
+      if (!GMB_isProtectedHeader_(sh, avisScoreCol)) Utils_setPreserveFormula(sh, rowIndex, avisScoreCol, r.avg, '0.00');
     }
   }
 
-  if (!GMB_isProtectedHeader_(sh, mapsMobCol)) setPreserveFormula_(sh, rowIndex, mapsMobCol, metrics['BUSINESS_IMPRESSIONS_MOBILE_MAPS']||0);
-  if (!GMB_isProtectedHeader_(sh, mapsDeskCol)) setPreserveFormula_(sh, rowIndex, mapsDeskCol, metrics['BUSINESS_IMPRESSIONS_DESKTOP_MAPS']||0);
-  if (!GMB_isProtectedHeader_(sh, srchMobCol)) setPreserveFormula_(sh, rowIndex, srchMobCol, metrics['BUSINESS_IMPRESSIONS_MOBILE_SEARCH']||0);
-  if (!GMB_isProtectedHeader_(sh, srchDeskCol)) setPreserveFormula_(sh, rowIndex, srchDeskCol, metrics['BUSINESS_IMPRESSIONS_DESKTOP_SEARCH']||0);
-  if (!GMB_isProtectedHeader_(sh, tauxIntCol)) setPreserveFormula_(sh, rowIndex, tauxIntCol, tauxInteraction, '0.00%');
-  if (!GMB_isProtectedHeader_(sh, tauxAppelCol)) setPreserveFormula_(sh, rowIndex, tauxAppelCol, tauxAppel, '0.00%');
+  if (!GMB_isProtectedHeader_(sh, mapsMobCol)) Utils_setPreserveFormula(sh, rowIndex, mapsMobCol, metrics['BUSINESS_IMPRESSIONS_MOBILE_MAPS'] || 0);
+  if (!GMB_isProtectedHeader_(sh, mapsDeskCol)) Utils_setPreserveFormula(sh, rowIndex, mapsDeskCol, metrics['BUSINESS_IMPRESSIONS_DESKTOP_MAPS'] || 0);
+  if (!GMB_isProtectedHeader_(sh, srchMobCol)) Utils_setPreserveFormula(sh, rowIndex, srchMobCol, metrics['BUSINESS_IMPRESSIONS_MOBILE_SEARCH'] || 0);
+  if (!GMB_isProtectedHeader_(sh, srchDeskCol)) Utils_setPreserveFormula(sh, rowIndex, srchDeskCol, metrics['BUSINESS_IMPRESSIONS_DESKTOP_SEARCH'] || 0);
+  if (!GMB_isProtectedHeader_(sh, tauxIntCol)) Utils_setPreserveFormula(sh, rowIndex, tauxIntCol, tauxInteraction, '0.00%');
+  if (!GMB_isProtectedHeader_(sh, tauxAppelCol)) Utils_setPreserveFormula(sh, rowIndex, tauxAppelCol, tauxAppel, '0.00%');
 }
 
 /* ---------- JOBS ---------- */
@@ -409,17 +348,17 @@ function run_GBM_AddLastMonth() {
   if (!sh) throw new Error(`Onglet ${SHEET_NAME} introuvable`);
 
   const today = new Date();
-  const start = new Date(today.getFullYear(), today.getMonth()-1, 1);
-  const end   = new Date(today.getFullYear(), today.getMonth(), 0);
+  const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  const end = new Date(today.getFullYear(), today.getMonth(), 0);
 
-  const raw = executeWithRetry_(() => fetchDailyMetrics_(LOCATION_NAME, start, end), 'GBM fetch N-1');
+  const raw = Utils_executeWithRetry(() => fetchDailyMetrics_(LOCATION_NAME, start, end), 'GBM fetch N-1');
   const monthly = aggregateByMonth_(raw);
 
   // Avis du même mois
-  const reviewsAgg = executeWithRetry_(() => fetchReviewsMonthly_(start, end), 'GBM reviews N-1');
+  const reviewsAgg = Utils_executeWithRetry(() => fetchReviewsMonthly_(start, end), 'GBM reviews N-1');
 
   Object.keys(monthly).forEach(ym => {
-    const moisCol = findColByHeaderAliases_(sh, ['mois']);
+    const moisCol = Utils_findColByHeaderAliases(sh, ['mois']);
     const row = _gbmFindOrInsertMonthRow_(sh, moisCol, ym);
     writeGBMRowAt_(sh, row, ym, monthly[ym], reviewsAgg);
   });
@@ -431,18 +370,18 @@ function run_GBM_FullHistory() {
 
   const today = new Date();
   const start = new Date(today.getFullYear(), today.getMonth() - 24, 1);
-  const end   = new Date(today.getFullYear(), today.getMonth(), 0);
+  const end = new Date(today.getFullYear(), today.getMonth(), 0);
 
-  const raw = executeWithRetry_(() => fetchDailyMetrics_(LOCATION_NAME, start, end), 'GBM fetch history');
+  const raw = Utils_executeWithRetry(() => fetchDailyMetrics_(LOCATION_NAME, start, end), 'GBM fetch history');
   const monthly = aggregateByMonth_(raw);
 
   // Avis sur la même fenêtre
-  const reviewsAgg = executeWithRetry_(() => fetchReviewsMonthly_(start, end), 'GBM reviews history');
+  const reviewsAgg = Utils_executeWithRetry(() => fetchReviewsMonthly_(start, end), 'GBM reviews history');
 
   // Écriture cellule par cellule
   const allKeys = new Set([...Object.keys(monthly), ...Object.keys(reviewsAgg)]);
   Array.from(allKeys).sort().forEach(ym => {
-    const moisCol = findColByHeaderAliases_(sh, ['mois']);
+    const moisCol = Utils_findColByHeaderAliases(sh, ['mois']);
     if (!moisCol) throw new Error("Colonne 'Mois' introuvable dans GMB.");
     const row = _gbmFindOrInsertMonthRow_(sh, moisCol, ym);
     writeGBMRowAt_(sh, row, ym, monthly[ym] || {}, reviewsAgg);
