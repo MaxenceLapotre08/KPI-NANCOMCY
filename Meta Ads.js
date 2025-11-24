@@ -256,12 +256,12 @@ function META_fetchInsightsMonthly_(fromDate, toDate) {
 }
 
 /******************************** MAGNETIS (appels) **************************/
-function META_valAt_(o, p) { return p.split('.').reduce((x, k) => (x && x[k] != null ? x[k] : undefined), o); }
+
 
 function META_getChannelName_(c) {
   const cand = ['channel_name', 'channel', 'analysis.channel', 'analytics.channel', 'utm.channel', 'session.channel'];
   for (const p of cand) {
-    const v = META_valAt_(c, p);
+    const v = Utils_valAt(c, p);
     if (v != null && String(v).trim() !== '') return String(v).trim().toLowerCase();
   }
   return '';
@@ -309,7 +309,7 @@ function META_magnetisMonthlyCalls_(fromDate, toDate) {
     if (!raw) return;
     const d = new Date(raw); if (isNaN(d.getTime())) return;
     if (META_MAG_ANSWERED_ONLY) {
-      const dur = Number(c.duration || META_valAt_(c, 'analysis.duration') || 0);
+      const dur = Number(c.duration || Utils_valAt(c, 'analysis.duration') || 0);
       if (!(dur > 0)) return;
     }
     const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -495,11 +495,8 @@ function META_mondayFormCountsByMonth_(fromUTC, toUTC) {
 }
 
 /**************** Monday Leads (Meta) → appels & formulaires lead ***********/
-function META_textEquals_(a, b) { return META__norm_(a) === META__norm_(b); }
-function META_textIncludesAny_(txt, arr) {
-  const t = META__norm_(txt || '');
-  return (arr || []).some(v => t.includes(META__norm_(v)));
-}
+
+
 
 // { 'YYYY-MM': n } — APPELS lead
 function META_mondayLeadCallsByMonth_(boardId, colSource, colType, colStatus, fromUTC, toUTC) {
@@ -522,9 +519,9 @@ function META_mondayLeadCallsByMonth_(boardId, colSource, colType, colStatus, fr
       const src = (cv.find(c => c.id === sourceId) || {}).text || '';
       const typ = (cv.find(c => c.id === typeId) || {}).text || '';
       const sts = (cv.find(c => c.id === statusId) || {}).text || '';
-      if (!META_textEquals_(src, META_LEADS_SOURCE_EQUALS)) return;
-      if (!META_textIncludesAny_(sts, META_LEADS_STATUS_MATCH)) return;
-      if (!META_textIncludesAny_(typ, META_LEADS_TYPE_CALL_MATCH)) return;
+      if (!Utils_textEquals(src, META_LEADS_SOURCE_EQUALS)) return;
+      if (!Utils_textIncludesAny(sts, META_LEADS_STATUS_MATCH)) return;
+      if (!Utils_textIncludesAny(typ, META_LEADS_TYPE_CALL_MATCH)) return;
       const key = when.getUTCFullYear() + '-' + String(when.getUTCMonth() + 1).padStart(2, '0');
       counts[key] = (counts[key] || 0) + 1;
     });
@@ -555,9 +552,9 @@ function META_mondayLeadFormsByMonth_(boardId, colSource, colType, colStatus, fr
       const src = (cv.find(c => c.id === sourceId) || {}).text || '';
       const typ = (cv.find(c => c.id === typeId) || {}).text || '';
       const sts = (cv.find(c => c.id === statusId) || {}).text || '';
-      if (!META_textEquals_(src, META_LEADS_SOURCE_EQUALS)) return;
-      if (!META_textIncludesAny_(sts, META_LEADS_STATUS_MATCH)) return;
-      if (!META_textIncludesAny_(typ, META_LEADS_TYPE_FORM_MATCH)) return;
+      if (!Utils_textEquals(src, META_LEADS_SOURCE_EQUALS)) return;
+      if (!Utils_textIncludesAny(sts, META_LEADS_STATUS_MATCH)) return;
+      if (!Utils_textIncludesAny(typ, META_LEADS_TYPE_FORM_MATCH)) return;
       const key = when.getUTCFullYear() + '-' + String(when.getUTCMonth() + 1).padStart(2, '0');
       counts[key] = (counts[key] || 0) + 1;
     });

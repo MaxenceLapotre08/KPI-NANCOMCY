@@ -7,13 +7,7 @@ const START_ROW_SITE = 6;
 const GA4_PROPERTY = 'properties/333690282';
 const GSC_SITE_URL = 'https://www.nancomcy.fr/';
 
-/****************************** CONFIG CHECK POSITION ************************/
-const SITE_CP_DOMAIN = 'nancomcy.fr';
-function SITE_getCheckPositionToken_() {
-  const t = PropertiesService.getScriptProperties().getProperty('CHECK_POSITION_TOKEN');
-  if (!t) throw new Error("Propriété 'CHECK_POSITION_TOKEN' manquante.");
-  return t;
-}
+
 
 /****************************** CONFIG MATOMO *******************************/
 function SITE_getMatomoToken_() {
@@ -289,10 +283,10 @@ function gscFetchMonthly_(siteUrl, startDate, endDate) {
 }
 
 /******************************** Magnetis **********************************/
-function SITE_valAt_(obj, path) { return path.split('.').reduce((o, k) => (o && o[k] != null ? o[k] : undefined), obj); }
+
 function SITE_getChannelName_(c) {
   const candidates = ['channel_name', 'channel', 'analysis.channel', 'analytics.channel', 'utm.channel', 'session.channel'];
-  for (const p of candidates) { const v = SITE_valAt_(c, p); if (v != null && String(v).trim() !== '') return String(v).trim().toLowerCase(); }
+  for (const p of candidates) { const v = Utils_valAt(c, p); if (v != null && String(v).trim() !== '') return String(v).trim().toLowerCase(); }
   return '';
 }
 function SITE_magChannelOk_(name) {
@@ -414,7 +408,7 @@ function SITE_paperformCountsByMonth_(fromDate, toDate) {
 }
 
 /******************************** Monday (général) **************************/
-function SITE__norm_(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[’'`]/g, '').replace(/\s+/g, ' ').trim(); }
+
 function SITE_mondayGraphQL_(query, variables) {
   const res = UrlFetchApp.fetch('https://api.monday.com/v2', {
     method: 'post',
@@ -429,22 +423,22 @@ function SITE_mondayGraphQL_(query, variables) {
 }
 function SITE_mondayResolveColumnId_(boardId, titleOrId) {
   if (!titleOrId) return '';
-  const looksId = /^[a-z0-9_]+$/i.test(titleOrId) && !SITE__norm_(titleOrId).includes(' ');
+  const looksId = /^[a-z0-9_]+$/i.test(titleOrId) && !Utils_normHeader(titleOrId).includes(' ');
   if (looksId) return titleOrId;
-  const want = SITE__norm_(titleOrId);
+  const want = Utils_normHeader(titleOrId);
   const q = `query($bid:[ID!]){ boards(ids:$bid){ columns{ id title type } } }`;
   const d = SITE_mondayGraphQL_(q, { bid: [Number(boardId)] });
   const cols = (d && d.boards && d.boards[0] && d.boards[0].columns) || [];
   let best = '';
-  for (const c of cols) { if (SITE__norm_(c.title) === want) { best = c.id; break; } }
-  if (!best) { for (const c of cols) { if (SITE__norm_(c.title).includes(want)) { best = c.id; break; } } }
+  for (const c of cols) { if (Utils_normHeader(c.title) === want) { best = c.id; break; } }
+  if (!best) { for (const c of cols) { if (Utils_normHeader(c.title).includes(want)) { best = c.id; break; } } }
   return best;
 }
 function SITE_mondayValueMatches_(txt) {
-  const t = SITE__norm_(txt || '');
+  const t = Utils_normHeader(txt || '');
   switch (SITE_MONDAY_MATCH_MODE) {
-    case 'equals': return SITE_MONDAY_MATCH_VALUES.some(v => t === SITE__norm_(v));
-    case 'includes': return SITE_MONDAY_MATCH_VALUES.some(v => t.includes(SITE__norm_(v)));
+    case 'equals': return SITE_MONDAY_MATCH_VALUES.some(v => t === Utils_normHeader(v));
+    case 'includes': return SITE_MONDAY_MATCH_VALUES.some(v => t.includes(Utils_normHeader(v)));
     default: return t.length > 0;
   }
 }
@@ -479,10 +473,7 @@ function SITE_mondayFormCountsByMonth_(boardId, colTitleOrId, fromUTC, toUTC) {
   return counts;
 }
 
-function SITE_textEqualsAny_(txt, arr) {
-  const t = SITE__norm_(txt || '');
-  return (arr || []).some(v => t === SITE__norm_(v));
-}
+
 
 /************ Monday — Lead calls & lead forms ******************************/
 function SITE_resolveTwoCols_(boardId, titleOrId1, titleOrId2) {
@@ -491,10 +482,7 @@ function SITE_resolveTwoCols_(boardId, titleOrId1, titleOrId2) {
   if (!id1 || !id2) throw new Error('Colonnes Monday (source/type) introuvables.');
   return { id1, id2 };
 }
-function SITE_textIncludesAny_(txt, arr) {
-  const t = SITE__norm_(txt || '');
-  return (arr || []).some(v => t.includes(SITE__norm_(v)));
-}
+
 // Appels lead
 // { 'YYYY-MM': n } — APPELS lead = Source match + Type "appel" (date=colonne Date si dispo sinon created_at)
 function SITE_mondayLeadCallsCountsByMonth_(boardId, colSource, colType, fromUTC, toUTC) {
@@ -538,9 +526,9 @@ function SITE_mondayLeadCallsCountsByMonth_(boardId, colSource, colType, fromUTC
       if (!(when >= fromUTC && when <= toUTC)) return;
 
       // Source : ÉGALITÉ stricte à une des valeurs autorisées
-      const sourceMatch = SITE_textEqualsAny_(srcText, SITE_MONDAY_LEADS_SOURCE_MATCH);
+      const sourceMatch = Utils_textEqualsAny(srcText, SITE_MONDAY_LEADS_SOURCE_MATCH);
       // Type : doit contenir "appel"
-      const typeMatch = SITE_textIncludesAny_(typText, SITE_MONDAY_LEADS_TYPE_MATCH);
+      const typeMatch = Utils_textIncludesAny(typText, SITE_MONDAY_LEADS_TYPE_MATCH);
 
       if (sourceMatch && typeMatch) {
         const key = when.getUTCFullYear() + '-' + String(when.getUTCMonth() + 1).padStart(2, '0');
@@ -594,9 +582,9 @@ function SITE_mondayLeadFormsCountsByMonth_(boardId, colSource, colType, colStat
       const when = SITE_parseMondayDateValue_(dcv) || createdAt;
 
       if (!(when >= fromUTC && when <= toUTC)) return;
-      if (!SITE_textIncludesAny_(src, SITE_MONDAY_LEADS_SOURCE_MATCH)) return;
-      if (!SITE_textIncludesAny_(typ, SITE_MONDAY_LEADS_FORM_MATCH)) return;
-      if (statusId && !SITE_textIncludesAny_(sts, SITE_MONDAY_LEADS_STATUS_MATCH)) return;
+      if (!Utils_textIncludesAny(src, SITE_MONDAY_LEADS_SOURCE_MATCH)) return;
+      if (!Utils_textIncludesAny(typ, SITE_MONDAY_LEADS_FORM_MATCH)) return;
+      if (statusId && !Utils_textIncludesAny(sts, SITE_MONDAY_LEADS_STATUS_MATCH)) return;
 
       const key = when.getUTCFullYear() + '-' + String(when.getUTCMonth() + 1).padStart(2, '0');
       counts[key] = (counts[key] || 0) + 1;
@@ -618,85 +606,7 @@ function SITE_formsCountsByMonth_(fromDateUTC, toDateUTC) {
   return out;
 }
 
-/******************************** CHECK POSITION ****************************/
-function SITE_cpGetAccountHid_() {
-  const token = SITE_getCheckPositionToken_();
-  const res = UrlFetchApp.fetch('https://api.check-position.com/account', { method: 'get', headers: { 'Authorization': 'Bearer ' + token }, muteHttpExceptions: true });
-  if (res.getResponseCode() >= 300) throw new Error('CheckPosition /account HTTP ' + res.getResponseCode() + ': ' + res.getContentText());
-  const data = JSON.parse(res.getContentText()).data;
-  return data && (data.hid || data.id || null);
-}
-function SITE_cpGetMonitors_() {
-  const token = SITE_getCheckPositionToken_();
-  const q = { 'with[]': ['website', 'keyword', 'tags'] };
-  let queryUrl = Object.keys(q).map(k => q[k].map(v => k + '=' + encodeURIComponent(v)).join('&')).join('&');
-  const url = 'https://api.check-position.com/monitors?' + queryUrl;
-  const res = UrlFetchApp.fetch(url, { method: 'get', headers: { 'Authorization': 'Bearer ' + token }, muteHttpExceptions: true });
-  if (res.getResponseCode() >= 300) throw new Error('CheckPosition /monitors HTTP ' + res.getResponseCode() + ': ' + res.getContentText());
-  return JSON.parse(res.getContentText()).data || [];
-}
-function SITE_cpFetchMonthReport_(accountHid, ymKey) {
-  const y = +ymKey.slice(0, 4), m = +ymKey.slice(5, 7) - 1;
-  for (let back = 0; back < 8; back++) {
-    const d = new Date(Date.UTC(y, m + 1, 0 - back, 0, 0, 0));
-    const yyyy = d.getUTCFullYear(), mm = String(d.getUTCMonth() + 1).padStart(2, '0'), dd = String(d.getUTCDate()).padStart(2, '0');
-    const url = `https://storage.check-position.com/monitor/report/${yyyy}/${mm}/${dd}/${accountHid}.json`;
-    try {
-      const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-      if (res.getResponseCode() === 200) return JSON.parse(res.getContentText());
-    } catch (e) { }
-  }
-  return null;
-}
-function SITE_cpMonthlyAveragePosition_(domain, ymKey, monitorsCache) {
-  const accountHid = SITE_cpGetAccountHid_();
-  const report = SITE_cpFetchMonthReport_(accountHid, ymKey);
-  if (!report || !report.monitors) return null;
-  const domainNorm = SITE_normalizeDomain_(domain);
-  const monitors = monitorsCache || SITE_cpGetMonitors_();
-  const wanted = {};
-  (monitors || []).forEach(m => {
-    if (m && m.website && SITE_normalizeDomain_(m.website.domain) === domainNorm) wanted[String(m.id)] = true;
-  });
-  let sum = 0, n = 0;
-  Object.keys(report.monitors).forEach(mid => {
-    if (!wanted[mid]) return;
-    const node = report.monitors[mid];
-    let pos = null;
-    if (Array.isArray(node)) pos = Number(node[0]);
-    else if (node && typeof node === 'object' && node.position != null) pos = Number(node.position);
-    else if (typeof node === 'number') pos = Number(node);
-    if (pos == null || isNaN(pos)) return;
-    if (pos === 0) pos = 100;
-    sum += pos; n += 1;
-  });
-  if (n === 0) return null;
-  return sum / n;
-}
-function SITE_cpMonthlyAvgBatch_(domain, ymKeys) {
-  const out = {}, accountHid = SITE_cpGetAccountHid_(), monitors = SITE_cpGetMonitors_();
-  ymKeys.forEach(ym => {
-    const report = SITE_cpFetchMonthReport_(accountHid, ym);
-    if (!report || !report.monitors) { out[ym] = null; return; }
-    const domainNorm = SITE_normalizeDomain_(domain);
-    let sum = 0, n = 0;
-    (monitors || []).forEach(m => {
-      if (!m || !m.website) return;
-      if (SITE_normalizeDomain_(m.website.domain) !== domainNorm) return;
-      const node = report.monitors[String(m.id)];
-      if (!node) return;
-      let pos = null;
-      if (Array.isArray(node)) pos = Number(node[0]);
-      else if (node && typeof node === 'object' && node.position != null) pos = Number(node.position);
-      else if (typeof node === 'number') pos = Number(node);
-      if (pos == null || isNaN(pos)) return;
-      if (pos === 0) pos = 100;
-      sum += pos; n += 1;
-    });
-    out[ym] = n > 0 ? (sum / n) : null;
-  });
-  return out;
-}
+
 
 /**************************** HELPERS SPÉCIFIQUES FEUILLE *************************/
 
@@ -781,12 +691,6 @@ function SITE_findCols_(sh) {
 
     // Ancien taux de conversion générique (si tu en as encore un)
     conv: Utils_findColByHeaderAliases(sh, ['taux de conversion', 'conversion rate', 'cr'], HEADERS_ROW_SITE),
-
-    // 🆕 Nouveaux taux de conversion dédiés
-    convContact: Utils_findColByHeaderAliases(sh, ['taux de conversion contact', 'taux de conversion (contact)'], HEADERS_ROW_SITE),
-    convLead: Utils_findColByHeaderAliases(sh, ['taux de conversion lead', 'taux de conversion (lead)'], HEADERS_ROW_SITE),
-
-    pos: Utils_findColByHeaderAliases(sh, ['position moyenne', 'avg position', 'average position'], HEADERS_ROW_SITE),
   };
 }
 
@@ -806,7 +710,6 @@ function SITE_writeMonthRow_(sh, cols, ymKey, values) {
   if (values.leadCalls != null) writePlan[cols.appelsLead] = { value: values.leadCalls, format: null };
   if (values.leadForms != null) writePlan[cols.formsLead] = { value: values.leadForms, format: null };
   if (values.bounce != null) writePlan[cols.bounce] = { value: values.bounce, format: '0.00%' };
-  if (values.avgPos != null) writePlan[cols.pos] = { value: isNaN(values.avgPos) ? 'Pas de données' : values.avgPos, format: '0.00' };
 
   // Données calculées par le script
   const impressions = values.impressions ?? Number(sh.getRange(row, cols.impr).getValue() || 0);
@@ -815,10 +718,7 @@ function SITE_writeMonthRow_(sh, cols, ymKey, values) {
   const leads = (values.leadCalls ?? Number(sh.getRange(row, cols.appelsLead).getValue() || 0)) + (values.leadForms ?? Number(sh.getRange(row, cols.formsLead).getValue() || 0));
 
   if (impressions > 0) writePlan[cols.ctr] = { value: sessions / impressions, format: '0.00%' };
-  if (sessions > 0) {
-    writePlan[cols.convContact] = { value: contacts / sessions, format: '0.00%' };
-    writePlan[cols.convLead] = { value: leads / sessions, format: '0.00%' };
-  }
+
 
   // 2. Exécuter le plan d'écriture, cellule par cellule
   Utils_setPreserveFormula(sh, row, cols.mois, Utils_monthKeyToFr(ymKey)); // Toujours écrire le mois
@@ -896,7 +796,7 @@ function run_Site_FullHistory() {
       Object.keys(leadCallsByMonth), Object.keys(leadFormsByMonth))
   )).sort();
 
-  const cpAvg = Utils_executeWithRetry(() => SITE_cpMonthlyAvgBatch_(SITE_CP_DOMAIN, keys), 'CheckPosition monthly avg');
+
 
   keys.forEach(ym => {
     const monthDate = new Date(parseInt(ym.slice(0, 4)), parseInt(ym.slice(5, 7)) - 1, 1);
@@ -911,7 +811,6 @@ function run_Site_FullHistory() {
       forms: formsByMonth[ym] ?? null,
       leadCalls: leadCallsByMonth[ym] ?? null,
       leadForms: leadFormsByMonth[ym] ?? null,
-      avgPos: cpAvg[ym] ?? null,
       bounce: ga[ym]?.bouncePct ?? null
     };
     SITE_writeMonthRow_(sh, cols, ym, values);
@@ -973,7 +872,7 @@ function run_Site_AddLastMonth() {
     'Monday lead forms N-1'
   );
 
-  const avgPos = Utils_executeWithRetry(() => SITE_cpMonthlyAveragePosition_(SITE_CP_DOMAIN, ymKey, null), 'CheckPosition N-1');
+
 
   const values = {
     sessions: useMatomo ? (sessionsData[ymKey]?.[0] ?? null) : (sessionsData[ymKey]?.sessions ?? null),
@@ -981,9 +880,7 @@ function run_Site_AddLastMonth() {
     impressions: gsc[ymKey]?.impressions ?? null,
     calls: callsByMonth[ymKey] ?? null,
     forms: formsByMonth[ymKey] ?? null,
-    leadCalls: leadCallsByMonth[ymKey] ?? null,
     leadForms: leadFormsByMonth[ymKey] ?? null,
-    avgPos: avgPos ?? null,
     bounce: gaForDuration[ymKey]?.bouncePct ?? null
   };
   SITE_writeMonthRow_(sh, cols, ymKey, values);
@@ -1027,8 +924,8 @@ function SITE_mondayFetchLeadCallsItems_(boardId, colSource, colType, fromUTC, t
       const cv = it.column_values || [];
       const srcText = (cv.find(c => c.id === sourceId) || {}).text || '';
       const typText = (cv.find(c => c.id === typeId) || {}).text || '';
-      if (!SITE_textIncludesAny_(srcText, SITE_MONDAY_LEADS_SOURCE_MATCH)) return;
-      if (!SITE_textIncludesAny_(typText, SITE_MONDAY_LEADS_TYPE_MATCH)) return;
+      if (!Utils_textIncludesAny(srcText, SITE_MONDAY_LEADS_SOURCE_MATCH)) return;
+      if (!Utils_textIncludesAny(typText, SITE_MONDAY_LEADS_TYPE_MATCH)) return;
 
       out.push({ id: it.id, name: it.name, created_at: dt.toISOString(), source: srcText, type: typText });
     });
@@ -1075,9 +972,9 @@ function SITE_mondayFetchLeadFormsItems_(boardId, colSource, colType, colStatus,
       const srcText = (cv.find(c => c.id === sourceId) || {}).text || '';
       const typText = (cv.find(c => c.id === typeId) || {}).text || '';
       const stText = (cv.find(c => c.id === statusId) || {}).text || '';
-      if (!SITE_textIncludesAny_(srcText, SITE_MONDAY_LEADS_SOURCE_MATCH)) return;
-      if (!SITE_textIncludesAny_(typText, SITE_MONDAY_LEADS_FORM_MATCH)) return;
-      if (!SITE_textIncludesAny_(stText, SITE_MONDAY_LEADS_STATUS_MATCH)) return;
+      if (!Utils_textIncludesAny(srcText, SITE_MONDAY_LEADS_SOURCE_MATCH)) return;
+      if (!Utils_textIncludesAny(typText, SITE_MONDAY_LEADS_FORM_MATCH)) return;
+      if (!Utils_textIncludesAny(stText, SITE_MONDAY_LEADS_STATUS_MATCH)) return;
 
       out.push({ id: it.id, name: it.name, created_at: dt.toISOString(), source: srcText, type: typText, status: stText });
     });
@@ -1158,7 +1055,7 @@ function SITE_cv_(cv, id) {
 }
 
 // bool includes any (case/accents insensitive)
-function SITE_includesAny_(txt, arr) { return SITE_textIncludesAny_(txt, arr); }
+function SITE_includesAny_(txt, arr) { return Utils_textIncludesAny(txt, arr); }
 
 // DEBUG: inspecte items et explique pourquoi inclus/exclus
 function run_Site_TestLeads_Debug() {
@@ -1333,11 +1230,7 @@ function run_Site_CurrentMonth() {
     'Monday lead forms mois en cours'
   );
 
-  // Position moyenne Check Position sur le mois (rapport mensuel)
-  const avgPos = Utils_executeWithRetry(
-    () => SITE_cpMonthlyAveragePosition_(SITE_CP_DOMAIN, ymKey, null),
-    'CheckPosition mois en cours'
-  );
+
 
   const values = {
     sessions: useMatomo ? (sessionsData[ymKey]?.[0] ?? null) : (sessionsData[ymKey]?.sessions ?? null),
@@ -1345,9 +1238,7 @@ function run_Site_CurrentMonth() {
     impressions: gsc[ymKey]?.impressions ?? null,
     calls: callsByMonth[ymKey] ?? null,
     forms: formsByMonth[ymKey] ?? null,
-    leadCalls: leadCallsByMonth[ymKey] ?? null,
     leadForms: leadFormsByMonth[ymKey] ?? null,
-    avgPos: avgPos ?? null,
     bounce: gaForOtherMetrics[ymKey]?.bouncePct ?? null
   };
 

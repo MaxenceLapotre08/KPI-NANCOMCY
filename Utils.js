@@ -206,3 +206,33 @@ function Utils_normalizeDomain(d) {
         .replace(/\/.*$/, '')
         .trim();
 }
+
+/**
+ * Récupère une valeur imbriquée dans un objet via un chemin (ex: "a.b.c").
+ */
+function Utils_valAt(obj, path) {
+    return path.split('.').reduce((o, k) => (o && o[k] != null ? o[k] : undefined), obj);
+}
+
+/**
+ * Vérifie si un texte correspond à l'un des éléments d'un tableau (comparaison normalisée).
+ */
+function Utils_textEqualsAny(txt, arr) {
+    const t = Utils_normHeader(txt || '');
+    return (arr || []).some(v => t === Utils_normHeader(v));
+}
+
+/**
+ * Vérifie si un texte contient l'un des éléments d'un tableau (comparaison normalisée).
+ */
+function Utils_textIncludesAny(txt, arr) {
+    const t = Utils_normHeader(txt || '');
+    return (arr || []).some(v => t.includes(Utils_normHeader(v)));
+}
+
+/**
+ * Vérifie si deux textes sont égaux (comparaison normalisée).
+ */
+function Utils_textEquals(a, b) {
+    return Utils_normHeader(a) === Utils_normHeader(b);
+}
