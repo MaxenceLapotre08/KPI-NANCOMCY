@@ -16,9 +16,6 @@ const METRICS = {
   'BUSINESS_DIRECTION_REQUESTS':         'Demande d\'itinéraire'
 };
 
-const CLIENT_ID = scriptProperties.getProperty('CLIENT_ID');
-const CLIENT_SECRET = scriptProperties.getProperty('CLIENT_SECRET');
-
 /* ---------- Helpers entêtes/format ---------- */
 function _normHeader_(s){
   return String(s||'').toLowerCase()
@@ -74,16 +71,19 @@ function _gbmStyleYearRow_(sh, row, moisCol) {
   sh.getRange(row, moisCol).setFontWeight('bold');
 }
 
-function setPreserveFormula_(sh, row, col, value, numberFormat) {
-  if (!col) return;
-  const cell = sh.getRange(row, col);
-  const formula = cell.getFormula();
-  if (formula) {
-    Logger.log(`[GMB SKIP] Préserve formule en ${cell.getA1Notation()} -> ${formula}`);
-    return;
-  }
-  cell.setValue(value);
-  if (numberFormat) cell.setNumberFormat(numberFormat);
+// VRAI si la colonne est listée comme ayant une formule dans Sheet_Structures.md
+function GMB_isProtectedHeader_(sh, col) {
+    if (!col) return false;
+    const headerVal = sh.getRange(HEADERS_ROW, col).getValue();
+    const h = _normHeader_(headerVal);
+
+    // Liste EXACTE des colonnes avec formules pour "GMB"
+    const protectedHeaders = [
+        'nombre de signature', 'total montant signe', 'montant moyen signature'
+    ].map(_normHeader_);
+
+    // La protection est active si le nom de colonne est dans la liste.
+    return protectedHeaders.some(p => h.includes(p));
 }
 
 /* ---------- OAuth ---------- */
@@ -91,8 +91,8 @@ function getService() {
   return OAuth2.createService('GBP')
     .setAuthorizationBaseUrl('https://accounts.google.com/o/oauth2/auth')
     .setTokenUrl('https://oauth2.googleapis.com/token')
-    .setClientId(GBP_OAUTH_CLIENT_ID)
-    .setClientSecret(GBP_OAUTH_CLIENT_SECRET)
+    .setClientId(CLIENT_ID)
+    .setClientSecret(CLIENT_SECRET)
     .setPropertyStore(PropertiesService.getUserProperties())
     .setScope('https://www.googleapis.com/auth/business.manage')
     .setCallbackFunction('authCallback');
@@ -379,27 +379,27 @@ function writeGBMRowAt_(sh, rowIndex, monthKey, metrics, reviewsAgg) {
   const tauxInteraction = vues ? ( (clics + appels + itin) / vues ) : 0;
   const tauxAppel       = vues ? ( appels / vues ) : 0;
 
-  setPreserveFormula_(sh, rowIndex, moisCol, monthKey);
-  setPreserveFormula_(sh, rowIndex, vuesCol, vues);
-  setPreserveFormula_(sh, rowIndex, clicsCol, clics);
-  setPreserveFormula_(sh, rowIndex, itinCol, itin);
-  setPreserveFormula_(sh, rowIndex, appelsCol, appels);
+  if (!GMB_isProtectedHeader_(sh, moisCol)) setPreserveFormula_(sh, rowIndex, moisCol, monthKey);
+  if (!GMB_isProtectedHeader_(sh, vuesCol)) setPreserveFormula_(sh, rowIndex, vuesCol, vues);
+  if (!GMB_isProtectedHeader_(sh, clicsCol)) setPreserveFormula_(sh, rowIndex, clicsCol, clics);
+  if (!GMB_isProtectedHeader_(sh, itinCol)) setPreserveFormula_(sh, rowIndex, itinCol, itin);
+  if (!GMB_isProtectedHeader_(sh, appelsCol)) setPreserveFormula_(sh, rowIndex, appelsCol, appels);
 
   // Avis (par mois) si reviewsAgg fourni
   if (reviewsAgg && (avisNbCol || avisScoreCol)) {
     const r = reviewsAgg[monthKey];
     if (r) {
-      setPreserveFormula_(sh, rowIndex, avisNbCol, r.count);
-      setPreserveFormula_(sh, rowIndex, avisScoreCol, r.avg, '0.00');
+      if (!GMB_isProtectedHeader_(sh, avisNbCol)) setPreserveFormula_(sh, rowIndex, avisNbCol, r.count);
+      if (!GMB_isProtectedHeader_(sh, avisScoreCol)) setPreserveFormula_(sh, rowIndex, avisScoreCol, r.avg, '0.00');
     }
   }
 
-  setPreserveFormula_(sh, rowIndex, mapsMobCol, metrics['BUSINESS_IMPRESSIONS_MOBILE_MAPS']||0);
-  setPreserveFormula_(sh, rowIndex, mapsDeskCol, metrics['BUSINESS_IMPRESSIONS_DESKTOP_MAPS']||0);
-  setPreserveFormula_(sh, rowIndex, srchMobCol, metrics['BUSINESS_IMPRESSIONS_MOBILE_SEARCH']||0);
-  setPreserveFormula_(sh, rowIndex, srchDeskCol, metrics['BUSINESS_IMPRESSIONS_DESKTOP_SEARCH']||0);
-  setPreserveFormula_(sh, rowIndex, tauxIntCol, tauxInteraction, '0.00%');
-  setPreserveFormula_(sh, rowIndex, tauxAppelCol, tauxAppel, '0.00%');
+  if (!GMB_isProtectedHeader_(sh, mapsMobCol)) setPreserveFormula_(sh, rowIndex, mapsMobCol, metrics['BUSINESS_IMPRESSIONS_MOBILE_MAPS']||0);
+  if (!GMB_isProtectedHeader_(sh, mapsDeskCol)) setPreserveFormula_(sh, rowIndex, mapsDeskCol, metrics['BUSINESS_IMPRESSIONS_DESKTOP_MAPS']||0);
+  if (!GMB_isProtectedHeader_(sh, srchMobCol)) setPreserveFormula_(sh, rowIndex, srchMobCol, metrics['BUSINESS_IMPRESSIONS_MOBILE_SEARCH']||0);
+  if (!GMB_isProtectedHeader_(sh, srchDeskCol)) setPreserveFormula_(sh, rowIndex, srchDeskCol, metrics['BUSINESS_IMPRESSIONS_DESKTOP_SEARCH']||0);
+  if (!GMB_isProtectedHeader_(sh, tauxIntCol)) setPreserveFormula_(sh, rowIndex, tauxIntCol, tauxInteraction, '0.00%');
+  if (!GMB_isProtectedHeader_(sh, tauxAppelCol)) setPreserveFormula_(sh, rowIndex, tauxAppelCol, tauxAppel, '0.00%');
 }
 
 /* ---------- JOBS ---------- */
@@ -439,25 +439,12 @@ function run_GBM_FullHistory() {
   // Avis sur la même fenêtre
   const reviewsAgg = executeWithRetry_(() => fetchReviewsMonthly_(start, end), 'GBM reviews history');
 
-  // Reset zone et réécriture avec séparateurs d’années
-  const lastRow = sh.getLastRow();
-  if (lastRow >= START_ROW) {
-    sh.getRange(START_ROW, 1, lastRow - START_ROW + 1, sh.getLastColumn()).clearContent().clearFormat();
-  }
-
-  const moisCol = findColByHeaderAliases_(sh, ['mois']);
-  let row = START_ROW;
-  let currentYear = null;
-
-  Object.keys(monthly).sort().forEach(ym => {
-    const y = ym.slice(0,4);
-    if (y !== currentYear) {
-      sh.getRange(row, moisCol).setValue(y);
-      _gbmStyleYearRow_(sh, row, moisCol);
-      currentYear = y;
-      row++;
-    }
-    writeGBMRowAt_(sh, row, ym, monthly[ym], reviewsAgg);
-    row++;
+  // Écriture cellule par cellule
+  const allKeys = new Set([...Object.keys(monthly), ...Object.keys(reviewsAgg)]);
+  Array.from(allKeys).sort().forEach(ym => {
+    const moisCol = findColByHeaderAliases_(sh, ['mois']);
+    if (!moisCol) throw new Error("Colonne 'Mois' introuvable dans GMB.");
+    const row = _gbmFindOrInsertMonthRow_(sh, moisCol, ym);
+    writeGBMRowAt_(sh, row, ym, monthly[ym] || {}, reviewsAgg);
   });
 }

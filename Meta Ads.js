@@ -94,18 +94,6 @@ function META_toast_(msg, title, seconds){
   try{ SpreadsheetApp.getActive().toast(msg, title||'Meta', seconds||5); }catch(e){} 
 }
 // Helper générique (déjà utilisé côté Google Ads)
-// NE PAS le redéclarer si tu l'as déjà !
-function setPreserveFormula_(sh, row, col, value, numberFormat) {
-  const cell = sh.getRange(row, col);
-  const formula = cell.getFormula();
-  if (formula) {
-    Logger.log(`[SKIP] Préserve formule en ${cell.getA1Notation()} -> ${formula}`);
-    return;
-  }
-  cell.setValue(value);
-  if (numberFormat) cell.setNumberFormat(numberFormat);
-}
-
 function META_executeWithRetry_(fn, label, maxRetries){
   label = label||'task'; maxRetries = maxRetries||3; let last;
   for (let i=1;i<=maxRetries;i++){
@@ -181,16 +169,9 @@ function META_monthKeyToFr_(ym){
 }
 
 function META_setSecondsAsDuration_(sh, row, col, secs){
-  const cell = sh.getRange(row, col);
-  const formula = cell.getFormula();
-  if (formula) {
-    Logger.log(`[Meta SKIP] Préserve formule durée en ${cell.getA1Notation()} -> ${formula}`);
-    return;
-  }
-
+  Logger.log(`[INFO] Meta Ads | Ligne ${row} | Tentative d'écriture de durée: ${secs} secondes.`);
   const days = (typeof secs==='number' && !isNaN(secs)) ? secs/86400 : 0;
-  cell.setValue(days);
-  cell.setNumberFormat('[h]:mm:ss');
+  setPreserveFormula_(sh, row, col, days, '[h]:mm:ss');
 }
 
 /************ Lignes présentes / recherche de ligne (SANS insertion) ********/
@@ -219,65 +200,48 @@ function META__styleYearRow_(sh,row,moisCol){
  * - Ne touche pas aux autres colonnes (les formules existantes restent)
  */
 function META_ensureMonthRow_(sh, moisCol, targetYM){
-  const existing = META_findExistingMonthRow_(sh, moisCol, targetYM);
-  if (existing){
-    Logger.log(`[Meta/ensureRow] Ligne déjà présente pour ${targetYM} → ${existing}`);
-    return existing;
-  }
+  const lastRow = sh.getLastRow();
 
-  const targetYear = parseInt(targetYM.slice(0,4),10);
-  let lastRow = Math.max(sh.getLastRow(), META_START_ROW-1);
-  let yearRow = null;
-
-  // Cherche si une ligne "année" existe déjà
-  for (let r=META_START_ROW; r<=lastRow; r++){
+  // 1. Chercher si la ligne du mois existe déjà
+  for (let r = META_START_ROW; r <= lastRow; r++) {
     const v = sh.getRange(r, moisCol).getValue();
-    if (META_isYearSeparatorRow_(v)){
-      const y = parseInt(String(v).trim(),10);
-      if (y === targetYear){
-        yearRow = r;
-        break;
-      }
-    }
-  }
-
-  // Si pas de ligne année → on l’ajoute (au bon endroit parmi les autres années)
-  if (!yearRow){
-    let insertAt = lastRow + 1;
-    for (let r=META_START_ROW; r<=lastRow; r++){
-      const v = sh.getRange(r, moisCol).getValue();
-      if (META_isYearSeparatorRow_(v)){
-        const y = parseInt(String(v).trim(),10);
-        if (y > targetYear){
-          insertAt = r;
-          break;
-        }
-      }
-    }
-    sh.insertRowBefore(insertAt);
-    yearRow = insertAt;
-    sh.getRange(yearRow, moisCol).setValue(String(targetYear));
-    META__styleYearRow_(sh, yearRow, moisCol);
-    lastRow++; // on a ajouté une ligne
-  }
-
-  // Cherche la position où insérer le mois dans cette année
-  let insertAt = yearRow + 1;
-  for (let r = yearRow + 1; r <= lastRow; r++){
-    const v = sh.getRange(r, moisCol).getValue();
-    if (META_isYearSeparatorRow_(v)) break; // année suivante
+    if (META_isYearSeparatorRow_(v)) continue;
     const ym = META_sheetCellToYYYYMM_(v);
-    if (!ym) continue;
-    if (ym > targetYM){
-      insertAt = r;
+    if (ym === targetYM) {
+      Logger.log(`[Meta/INFO] Ligne pour ${targetYM} trouvée en ${r}. Utilisation de la ligne existante.`);
+      return r;
+    }
+  }
+
+  // 2. Si elle n'existe pas, trouver la dernière ligne de données en se basant sur la colonne Mois
+  let lastDataRow = META_START_ROW - 1;
+  for (let r = lastRow; r >= META_START_ROW; r--) {
+    const v = sh.getRange(r, moisCol).getValue();
+    if (v !== '') {
+      lastDataRow = r;
       break;
     }
-    insertAt = r + 1; // après le dernier mois rencontré
   }
 
-  sh.insertRowBefore(insertAt);
-  Logger.log(`[Meta/ensureRow] Insertion nouvelle ligne pour ${targetYM} → ${insertAt}`);
-  return insertAt;
+  const targetRow = lastDataRow + 1;
+  const lastDataValue = lastDataRow >= META_START_ROW ? sh.getRange(lastDataRow, moisCol).getValue() : '';
+  const lastDataYM = META_sheetCellToYYYYMM_(lastDataValue) || '1999-12';
+
+  // 3. Gérer le cas particulier du changement d'année
+  const lastYear = parseInt(lastDataYM.slice(0, 4), 10);
+  const targetYear = parseInt(targetYM.slice(0, 4), 10);
+
+  if (targetYear > lastYear) {
+    Logger.log(`[Meta/INFO] Changement d'année détecté (${lastYear} -> ${targetYear}). Ajout d'un séparateur.`);
+    sh.getRange(targetRow, moisCol).setValue(String(targetYear));
+    META__styleYearRow_(sh, targetRow, moisCol);
+    Logger.log(`[Meta/WRITE] Écriture des KPIs pour ${targetYM} sur la nouvelle ligne ${targetRow + 1}`);
+    return targetRow + 1;
+  }
+
+  // 4. Cas normal : on écrit sur la ligne juste après la dernière
+  Logger.log(`[Meta/WRITE] Écriture des KPIs pour ${targetYM} sur la nouvelle ligne ${targetRow}`);
+  return targetRow;
 }
 
 /****************************** RANGE DE MOIS (bornage strict) **************/
@@ -758,10 +722,19 @@ function META_findBudgetColSafe_(sheet) {
 }
 // Vrai si la colonne a un header "protégé" (contacts, leads, signatures, ROAS, ROI)
 function META_isProtectedHeader_(sh, col) {
-  if (!col) return false;
-  const headerVal = sh.getRange(META_HEADERS_ROW, col).getValue();
-  const h = META__normHeader_(headerVal);
-  return /(contact|contacts|lead|leads|signature|signatures|roas|roi)/.test(h);
+    if (!col) return false;
+    const headerVal = sh.getRange(META_HEADERS_ROW, col).getValue();
+    const h = META__normHeader_(headerVal);
+
+    // Liste EXACTE des colonnes avec formules pour "Meta Ads"
+    // tirée de Sheet_Structures.md
+    const protectedHeaders = [
+        'cout par contact', 'cout par lead', 'nombre de signature',
+        'total montant signe', 'cout par signature', 'montant moyen signature',
+        'roas', 'roi', 'nombre de contacts', 'nombre de lead', 'cpm'
+    ].map(META__normHeader_);
+
+    return protectedHeaders.includes(h);
 }
 
 /**************************** MAPPING COLONNES ******************************/
@@ -810,12 +783,7 @@ function META_writeMonth_(sh, cols, ymKey, v){
   const row = META_ensureMonthRow_(sh, cols.mois, ymKey);
 
   // Mois : on n’écrase pas une éventuelle formule
-  const moisCell = sh.getRange(row, cols.mois);
-  if (!moisCell.getFormula()) {
-    moisCell.setValue(META_monthKeyToFr_(ymKey));
-  } else {
-    Logger.log(`[Meta SKIP] Préserve formule en ${moisCell.getA1Notation()} -> ${moisCell.getFormula()}`);
-  }
+  setPreserveFormula_(sh, row, cols.mois, META_monthKeyToFr_(ymKey));
 
   Logger.log(
     `[Meta/write] ${ymKey} → ligne ${row} | `+
@@ -823,48 +791,48 @@ function META_writeMonth_(sh, cols, ymKey, v){
     `calls=${v.calls ?? '∅'}, forms=${v.forms ?? '∅'}, callsLead=${v.callsLead ?? '∅'}, formsLead=${v.formsLead ?? '∅'}, avgSec=${v.avgSec ?? '∅'}`
   );
 
-  // 🔹 Sources directes (avec protection des formules)
-  // Sources directes (autorisées) - setPreserveFormula_ évite d'écraser les formules
-  if (cols.budget && v.spend != null) setPreserveFormula_(sh, row, cols.budget, v.spend, '0.00 €');
-  if (cols.impr && v.impressions != null) setPreserveFormula_(sh, row, cols.impr, v.impressions);
-  if (cols.clicks && v.clicks != null) setPreserveFormula_(sh, row, cols.clicks, v.clicks);
-  if (cols.interN && v.interactions != null) setPreserveFormula_(sh, row, cols.interN, v.interactions);
-  if (cols.appels && v.calls != null) setPreserveFormula_(sh, row, cols.appels, v.calls);
-  if (cols.forms && v.forms != null) setPreserveFormula_(sh, row, cols.forms, v.forms);
-  if (cols.callsLead && v.callsLead != null) setPreserveFormula_(sh, row, cols.callsLead, v.callsLead);
-  if (cols.formsLead && v.formsLead != null) setPreserveFormula_(sh, row, cols.formsLead, v.formsLead);
-  if (cols.dur && v.avgSec != null) META_setSecondsAsDuration_(sh, row, cols.dur, v.avgSec);
+  // 1. Préparer le plan d'écriture
+  const writePlan = {};
+  if (v.spend != null) writePlan[cols.budget] = { value: v.spend, format: '0.00 €' };
+  if (v.impressions != null) writePlan[cols.impr] = { value: v.impressions, format: null };
+  if (v.clicks != null) writePlan[cols.clicks] = { value: v.clicks, format: null };
+  if (v.interactions != null) writePlan[cols.interN] = { value: v.interactions, format: null };
+  if (v.calls != null) writePlan[cols.appels] = { value: v.calls, format: null };
+  if (v.forms != null) writePlan[cols.forms] = { value: v.forms, format: null };
+  if (v.callsLead != null) writePlan[cols.callsLead] = { value: v.callsLead, format: null };
+  if (v.formsLead != null) writePlan[cols.formsLead] = { value: v.formsLead, format: null };
+  if (v.avgSec != null) writePlan[cols.dur] = { value: v.avgSec / 86400, format: '[h]:mm:ss' };
+
+  // 2. Exécuter le plan, cellule par cellule
+  for (const col in writePlan) {
+    if (!col || col === '0') continue;
+    if (META_isProtectedHeader_(sh, col)) {
+      Logger.log(`[PROTECTED] Colonne ${sh.getRange(META_HEADERS_ROW, col).getValue()} ignorée car protégée.`);
+      continue;
+    }
+    setPreserveFormula_(sh, row, col, writePlan[col].value, writePlan[col].format);
+  }
 
 
   // 🔹 Dérivés autorisés : CTR / Taux d’interaction / Taux de conversion
   //    (eux aussi protégés au cas où tu mettrais une formule perso)
-  const clicks = Number(
-    v.clicks ?? (cols.clicks ? sh.getRange(row, cols.clicks).getValue() : 0)
-  ) || 0;
-  const impr   = Number(
-    v.impressions ?? (cols.impr  ? sh.getRange(row, cols.impr ).getValue() : 0)
-  ) || 0;
-  const inters = Number(
-    v.interactions ?? (cols.interN? sh.getRange(row, cols.interN).getValue() : 0)
-  ) || 0;
+  const clicks = Number(sh.getRange(row, cols.clicks).getValue() || 0);
+  const impr   = Number(sh.getRange(row, cols.impr).getValue() || 0);
+  const inters = Number(sh.getRange(row, cols.interN).getValue() || 0);
 
-  if (cols.ctr) {
+  if (cols.ctr && !META_isProtectedHeader_(sh, cols.ctr)) {
     const ctr = impr>0 ? (clicks/impr) : 0;
     setPreserveFormula_(sh, row, cols.ctr, ctr, '0.00%');
   }
 
-  if (cols.interR) {
+  if (cols.interR && !META_isProtectedHeader_(sh, cols.interR)) {
     const ir = impr>0 ? (inters/impr) : 0;
     setPreserveFormula_(sh, row, cols.interR, ir, '0.00%');
   }
 
-  if (cols.conv) {
-    const calls = Number(
-      v.calls ?? (cols.appels ? sh.getRange(row, cols.appels).getValue() : 0)
-    ) || 0;
-    const forms = Number(
-      v.forms ?? (cols.forms ? sh.getRange(row, cols.forms).getValue() : 0)
-    ) || 0;
+  if (cols.conv && !META_isProtectedHeader_(sh, cols.conv)) {
+    const calls = Number(sh.getRange(row, cols.appels).getValue() || 0);
+    const forms = Number(sh.getRange(row, cols.forms).getValue() || 0);
     const cr = clicks>0 ? ((calls+forms)/clicks) : 0;
     setPreserveFormula_(sh, row, cols.conv, cr, '0.00%');
   }

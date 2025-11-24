@@ -219,32 +219,28 @@ function sheetCellToYYYYMM_(cell) {
 
 // Affiche correctement des "secondes" en durée [h]:mm:ss dans Sheets
 function setSecondsAsDuration_(sh, row, col, secs) {
-  var cell = sh.getRange(row, col);
-  if (cell.getFormula()) {
-    Logger.log(
-      `[SKIP] Préserve formule durée en ${cell.getA1Notation()} (${cell.getFormula()})`
-    );
-    return;
-  }
-  var days = (typeof secs === 'number' && !isNaN(secs)) ? secs / 86400 : 0;
-  cell.setValue(days);
-  cell.setNumberFormat('[h]:mm:ss');
+  const days = (typeof secs === 'number' && !isNaN(secs)) ? secs / 86400 : 0;
+  setPreserveFormula_(sh, row, col, days, '[h]:mm:ss');
 }
 
 // Écrit une valeur uniquement si la cellule NE contient PAS de formule
 function setPreserveFormula_(sh, row, col, value, numberFormat) {
+  if (!col || !sh) return;
   const cell = sh.getRange(row, col);
   const formula = cell.getFormula();
   if (formula) {
-    Logger.log(
-      `[SKIP] Préserve formule en ${cell.getA1Notation()} -> ${formula}`
-    );
+    // On ne log que si la formule est non vide pour éviter le bruit
+    if (formula.trim()) {
+      Logger.log(`[SKIP] Préserve formule en ${cell.getA1Notation()} -> ${formula}`);
+    }
     return;
   }
+  // LOG DÉTAILLÉ : On écrit car aucune formule n'a été trouvée.
+  const sheetName = sh.getName();
+  const a1 = cell.getA1Notation();
+  Logger.log(`[WRITE] ${sheetName} | ${a1} | Aucune formule détectée. Écriture de la valeur: "${value}"`);
   cell.setValue(value);
-  if (numberFormat) {
-    cell.setNumberFormat(numberFormat);
-  }
+  if (numberFormat) cell.setNumberFormat(numberFormat);
 }
 
 // Normalisation & repérage d’en-têtes
@@ -411,112 +407,79 @@ function _adsFindExistingMonthRow_(sh, moisCol, targetYM) {
  * - Ne touche pas aux autres colonnes (les formules restent)
  */
 function _adsFindOrInsertMonthRow_(sh, moisCol, targetYM) {
-  const existing = _adsFindExistingMonthRow_(sh, moisCol, targetYM);
-  if (existing) {
-    Logger.log(`[Ads/ensureRow] Ligne déjà présente pour ${targetYM} → ${existing}`);
-    return existing;
-  }
+  const lastRow = sh.getLastRow();
 
-  const targetYear = parseInt(targetYM.slice(0, 4), 10);
-  let lastRow = Math.max(sh.getLastRow(), START_ROW_ADS - 1);
-  let yearRow = null;
-
-  // Cherche si une ligne "année" existe déjà
+  // 1. Chercher si la ligne du mois existe déjà
   for (let r = START_ROW_ADS; r <= lastRow; r++) {
     const v = sh.getRange(r, moisCol).getValue();
-    if (isYearSeparatorRow_(v)) {
-      const y = parseInt(String(v).trim(), 10);
-      if (y === targetYear) {
-        yearRow = r;
-        break;
-      }
-    }
-  }
-
-  // Si pas de ligne année → on l’ajoute (au bon endroit parmi les autres années)
-  if (!yearRow) {
-    let insertAt = lastRow + 1;
-    for (let r = START_ROW_ADS; r <= lastRow; r++) {
-      const v = sh.getRange(r, moisCol).getValue();
-      if (isYearSeparatorRow_(v)) {
-        const y = parseInt(String(v).trim(), 10);
-        if (y > targetYear) {
-          insertAt = r;
-          break;
-        }
-      }
-    }
-    sh.insertRowBefore(insertAt);
-    yearRow = insertAt;
-    sh.getRange(yearRow, moisCol).setValue(String(targetYear));
-    _adsStyleYearRow_(sh, yearRow, moisCol);
-    lastRow++; // on a ajouté une ligne
-  }
-
-  // Cherche la position où insérer le mois dans cette année
-  let insertAt = yearRow + 1;
-  for (let r = yearRow + 1; r <= lastRow; r++) {
-    const v = sh.getRange(r, moisCol).getValue();
-    if (isYearSeparatorRow_(v)) break; // année suivante
+    if (isYearSeparatorRow_(v)) continue;
     const ym = sheetCellToYYYYMM_(v);
-    if (!ym) continue;
-    if (ym > targetYM) {
-      insertAt = r;
+    if (ym === targetYM) {
+      Logger.log(`[Ads/INFO] Ligne pour ${targetYM} trouvée en ${r}. Utilisation de la ligne existante.`);
+      return r;
+    }
+  }
+
+  // 2. Si elle n'existe pas, trouver la dernière ligne de données en se basant sur la colonne Mois
+  let lastDataRow = START_ROW_ADS - 1;
+  for (let r = lastRow; r >= START_ROW_ADS; r--) {
+    const v = sh.getRange(r, moisCol).getValue();
+    if (v !== '') {
+      lastDataRow = r;
       break;
     }
-    insertAt = r + 1; // après le dernier mois rencontré
   }
 
-  sh.insertRowBefore(insertAt);
-  Logger.log(`[Ads/ensureRow] Insertion nouvelle ligne pour ${targetYM} → ${insertAt}`);
-  return insertAt;
+  const targetRow = lastDataRow + 1;
+  const lastDataValue = lastDataRow >= START_ROW_ADS ? sh.getRange(lastDataRow, moisCol).getValue() : '';
+  const lastDataYM = sheetCellToYYYYMM_(lastDataValue) || '1999-12';
+
+  // 3. Gérer le cas particulier du changement d'année
+  const lastYear = parseInt(lastDataYM.slice(0, 4), 10);
+  const targetYear = parseInt(targetYM.slice(0, 4), 10);
+
+  if (targetYear > lastYear) {
+    Logger.log(`[Ads/INFO] Changement d'année détecté (${lastYear} -> ${targetYear}). Ajout d'un séparateur.`);
+    sh.getRange(targetRow, moisCol).setValue(String(targetYear));
+    _adsStyleYearRow_(sh, targetRow, moisCol);
+    Logger.log(`[Ads/WRITE] Écriture des KPIs pour ${targetYM} sur la nouvelle ligne ${targetRow + 1}`);
+    return targetRow + 1;
+  }
+
+  // 4. Cas normal : on écrit sur la ligne juste après la dernière
+  Logger.log(`[Ads/WRITE] Écriture des KPIs pour ${targetYM} sur la nouvelle ligne ${targetRow}`);
+  return targetRow;
 }
 
-
-// ÉCRITURE (in-place, préserve D/E/F/G — CTR sera recalculé ensuite)
-function writeAdsMonthlyToSheetFlexible(data) {
+// ÉCRITURE (in-place, cellule par cellule pour préserver les formules)
+function writeAdsMonthlyToSheetFlexible(data){
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME_ADS);
   if (!sh) throw new Error(`Onglet ${SHEET_NAME_ADS} introuvable`);
 
   const byMonth = aggregateAdsByMonth_(data);
   const monthKeys = Object.keys(byMonth).sort();
-  if (!monthKeys.length) throw new Error('[Ads] Aucune donnée agrégée (0 mois).');
+  if (!monthKeys.length) { Logger.log('[Ads] Aucune donnée agrégée à écrire.'); return; }
 
   const moisCol   = findColByHeaderAliases_(sh, ['mois'], HEADERS_ROW_ADS);
   const budgetCol = findColByHeaderAliases_(sh, ['budget investi','depenses','depense','cout','coût','spend','cost'], HEADERS_ROW_ADS);
   const impCol    = findColByHeaderAliases_(sh, ['impressions','nb impressions','nombre dimpressions','nombre d impressions'], HEADERS_ROW_ADS);
   const clkCol    = findColByHeaderAliases_(sh, ['clics','clicks','nb clics','nombre de clics'], HEADERS_ROW_ADS);
   const cpcCol    = findColByHeaderAliases_(sh, ['cpc','cout par clic','coût par clic','cost per click'], HEADERS_ROW_ADS);
-  const callsCol  = findColByHeaderAliases_(sh, ['appels google ads','appels','calls','nombre dappels'], HEADERS_ROW_ADS);
 
-  const missing = [];
-  if (!moisCol)   missing.push('Mois');
-  if (!budgetCol) missing.push('Budget investi');
-  if (!impCol)    missing.push('Impressions');
-  if (!clkCol)    missing.push('Clics');
-  if (!cpcCol)    missing.push('CPC');
-  if (missing.length) throw new Error('[Ads] Colonnes manquantes: ' + missing.join(', '));
+  // On ne vérifie que la colonne 'Mois' car les autres sont optionnelles
+  if (!moisCol) throw new Error("[Ads] Colonne 'Mois' introuvable.");
 
   let wrote = 0;
   for (const k of monthKeys) {
     const v = byMonth[k];
     const row = _adsFindOrInsertMonthRow_(sh, moisCol, k);
 
-    // Mois = texte => en général pas une formule, mais on log si jamais
-    const moisCell = sh.getRange(row, moisCol);
-    if (!moisCell.getFormula()) {
-      moisCell.setValue(monthKeyToFr_(k));
-    } else {
-      Logger.log(`[SKIP] Préserve formule en ${moisCell.getA1Notation()}`);
-    }
+    setPreserveFormula_(sh, row, moisCol, monthKeyToFr_(k));
 
     setPreserveFormula_(sh, row, budgetCol, v.cost, '0.00 €');
     setPreserveFormula_(sh, row, impCol,    v.impressions, null);
     setPreserveFormula_(sh, row, clkCol,    v.clicks, null);
     setPreserveFormula_(sh, row, cpcCol,    v.cpc, '0.00 €');
-    if (callsCol) {
-      setPreserveFormula_(sh, row, callsCol, v.calls || 0, null);
-    }
     wrote++;
   }
   Logger.log(`[Ads in-place] Mois écrits/MAJ: ${wrote}`);
@@ -796,7 +759,7 @@ function run_MagnetisToAds_SyncForSheet() {
     if (isYearSeparatorRow_(cell)) continue;
     const ym = sheetCellToYYYYMM_(cell);
     if (!ym) continue;
-    sh.getRange(r, CALLS_COL).setValue(callsByMonth[ym] || 0);
+    setPreserveFormula_(sh, r, CALLS_COL, callsByMonth[ym] || 0);
   }
 }
 
@@ -821,7 +784,9 @@ function run_MagnetisToAds_AddLastMonth() {
     if (isYearSeparatorRow_(val)) continue;
     const ym = sheetCellToYYYYMM_(val);
     if (ym === monthKey) {
-      setPreserveFormula_(sh, r, FORMS_COL, n);
+      // Correction: la variable était FORMS_COL au lieu de CALLS_COL
+      // et l'appel doit être sécurisé.
+      setPreserveFormula_(sh, r, CALLS_COL, n);
       break;
     }
   }
@@ -847,7 +812,7 @@ function run_MagnetisToAds_CurrentMonth() {
     if (isYearSeparatorRow_(val)) continue;
     const ym = sheetCellToYYYYMM_(val);
     if (ym === monthKey) {
-      sh.getRange(r, CALLS_COL).setValue(n);
+      setPreserveFormula_(sh, r, CALLS_COL, n);
       break;
     }
   }
@@ -1423,7 +1388,10 @@ function run_FormsToAds_AddLastMonth() {
     const val = sh.getRange(r,1).getValue();
     if (isYearSeparatorRow_(val)) continue;
     const ym = sheetCellToYYYYMM_(val);
-    if (ym === monthKey) { sh.getRange(r, FORMS_COL).setValue(n); break; }
+    if (ym === monthKey) {
+      setPreserveFormula_(sh, r, FORMS_COL, n);
+      break;
+    }
   }
 }
 // Mois en cours uniquement

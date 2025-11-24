@@ -15,6 +15,19 @@ function SITE_getCheckPositionToken_() {
   return t;
 }
 
+/****************************** CONFIG MATOMO *******************************/
+function SITE_getMatomoToken_() {
+  const t = PropertiesService.getScriptProperties().getProperty('MATOMO_TOKEN');
+  if (!t) throw new Error("Propriété 'MATOMO_TOKEN' manquante.");
+  return t;
+}
+
+function SITE_getMatomoSegmentId_() {
+  const id = PropertiesService.getScriptProperties().getProperty('MATOMO_SEGMENT_ID');
+  // Si aucun ID n'est défini, on n'applique pas de segment.
+  return id || null;
+}
+
 /****************************** CONFIG MAGNETIS *****************************/
 function SITE_getMagApiKey_() {
   const k = PropertiesService.getScriptProperties().getProperty('MAGNETIS_API_KEY');
@@ -177,8 +190,9 @@ function SITE_monthKeyToFr_(ym){
   return `${FR[m]} ${y}`;
 }
 function SITE_setSecondsAsDuration_(sh, row, col, secs){
+  Logger.log(`[INFO] Site Internet | Ligne ${row} | Tentative d'écriture de durée: ${secs} secondes.`);
   const days = (typeof secs==='number' && !isNaN(secs)) ? secs/86400 : 0;
-  const rng = sh.getRange(row,col); rng.setValue(days); rng.setNumberFormat('[h]:mm:ss');
+  setPreserveFormula_(sh, row, col, days, '[h]:mm:ss');
 }
 function SITE_normalizeDomain_(d){
   return String(d||'').toLowerCase().replace(/^https?:\/\//,'').replace(/^www\./,'').replace(/\/.*$/,'').trim();
@@ -189,86 +203,52 @@ function SITE__styleYearRow_(sh,row,moisCol){
   sh.getRange(row,1,1,sh.getLastColumn()).setBackground('#e6e1f5');
   sh.getRange(row,moisCol).setFontWeight('bold');
 }
-function SITE__findOrInsertMonthRow_(sh, moisCol, targetYM){
-  const targetYear = parseInt(targetYM.slice(0,4),10);
+function SITE__findOrInsertMonthRow_(sh, moisCol, targetYM) {
   const lastRow = sh.getLastRow();
 
-  // Si la feuille n'a encore aucune donnée sous les entêtes
-  if (lastRow < START_ROW_SITE){
-    sh.insertRowsBefore(START_ROW_SITE, 2);
-    sh.getRange(START_ROW_SITE, moisCol).setValue(String(targetYear));
-    SITE__styleYearRow_(sh, START_ROW_SITE, moisCol);
-    return START_ROW_SITE + 1;
+  // 1. Chercher si la ligne du mois existe déjà
+  for (let r = START_ROW_SITE; r <= lastRow; r++) {
+    const v = sh.getRange(r, moisCol).getValue();
+    if (SITE_isYearSeparatorRow_(v)) continue;
+    const ym = SITE_sheetCellToYYYYMM_(v);
+    if (ym === targetYM) {
+      Logger.log(`[INFO] Ligne pour ${targetYM} trouvée en ${r}. Utilisation de la ligne existante.`);
+      return r; // La ligne existe, on la retourne sans rien toucher.
+    }
   }
 
-  const nbRows = lastRow - START_ROW_SITE + 1;
-  const values = sh.getRange(START_ROW_SITE, moisCol, nbRows, 1).getValues();
-
-  let existingRow = null;
-  let yearRowTarget = null;
-  let firstGreaterYearRow = null;
-  let lastMonthRowInTargetYear = null;
-
-  for (let i = 0; i < values.length; i++){
-    const rowIndex = START_ROW_SITE + i;
-    const v = values[i][0];
-
-    // Ligne "année" (ex: 2024)
-    if (SITE_isYearSeparatorRow_(v)){
-      const y = parseInt(String(v).trim(),10);
-      if (y === targetYear && yearRowTarget === null) {
-        yearRowTarget = rowIndex;
-      }
-      if (y > targetYear && firstGreaterYearRow === null) {
-        firstGreaterYearRow = rowIndex;
-      }
-      continue;
-    }
-
-    // Ligne "mois" (ex: "novembre 2024", "2024-11"...)
-    const ym = SITE_sheetCellToYYYYMM_(v);
-    if (!ym) continue;
-
-    if (ym === targetYM){
-      existingRow = rowIndex;
+  // 2. Si elle n'existe pas, trouver la dernière ligne de données en se basant sur la colonne Mois
+  let lastDataRow = START_ROW_SITE - 1;
+  for (let r = lastRow; r >= START_ROW_SITE; r--) {
+    const v = sh.getRange(r, moisCol).getValue();
+    // La dernière ligne de donnée est la première non-vide en partant du bas
+    if (v !== '') {
+      lastDataRow = r;
       break;
     }
-
-    const y = parseInt(ym.slice(0,4),10);
-    if (y === targetYear){
-      lastMonthRowInTargetYear = rowIndex;
-    }
   }
 
-  // 1) Si le mois existe déjà → on réutilise la ligne
-  if (existingRow) return existingRow;
+  const targetRow = lastDataRow + 1;
+  const lastDataValue = lastDataRow >= START_ROW_SITE ? sh.getRange(lastDataRow, moisCol).getValue() : '';
+  const lastDataYM = SITE_sheetCellToYYYYMM_(lastDataValue) || '1999-12';
 
-  // 2) S'il y a déjà des mois pour cette année → on insère juste après le dernier mois
-  if (lastMonthRowInTargetYear){
-    sh.insertRowsAfter(lastMonthRowInTargetYear, 1);
-    return lastMonthRowInTargetYear + 1;
+  // 3. Gérer le cas particulier du changement d'année
+  const lastYear = parseInt(lastDataYM.slice(0, 4), 10);
+  const targetYear = parseInt(targetYM.slice(0, 4), 10);
+
+  if (targetYear > lastYear) {
+    Logger.log(`[INFO] Changement d'année détecté (${lastYear} -> ${targetYear}). Ajout d'un séparateur.`);
+    // On écrit la nouvelle année sur la ligne cible
+    sh.getRange(targetRow, moisCol).setValue(String(targetYear));
+    SITE__styleYearRow_(sh, targetRow, moisCol);
+    // La ligne pour les KPIs sera celle d'en dessous
+    Logger.log(`[WRITE] Écriture des KPIs pour ${targetYM} sur la nouvelle ligne ${targetRow + 1}`);
+    return targetRow + 1;
   }
 
-  // 3) S'il y a déjà la ligne "année" mais aucun mois → on ajoute juste en dessous
-  if (yearRowTarget){
-    sh.insertRowsAfter(yearRowTarget, 1);
-    return yearRowTarget + 1;
-  }
-
-  // 4) Sinon, on insère l'année avant la première année plus grande
-  if (firstGreaterYearRow){
-    sh.insertRowsBefore(firstGreaterYearRow, 2);
-    sh.getRange(firstGreaterYearRow, moisCol).setValue(String(targetYear));
-    SITE__styleYearRow_(sh, firstGreaterYearRow, moisCol);
-    return firstGreaterYearRow + 1;
-  }
-
-  // 5) Dernier cas : aucune année supérieure → on ajoute à la fin
-  const yearRowIns = lastRow + 1;
-  sh.insertRowsBefore(yearRowIns, 2);
-  sh.getRange(yearRowIns, moisCol).setValue(String(targetYear));
-  SITE__styleYearRow_(sh, yearRowIns, moisCol);
-  return yearRowIns + 1;
+  // 4. Cas normal : on écrit sur la ligne juste après la dernière
+  Logger.log(`[WRITE] Écriture des KPIs pour ${targetYM} sur la nouvelle ligne ${targetRow}`);
+  return targetRow;
 }
 
 /******************************** GA4 ***************************************/
@@ -297,6 +277,48 @@ function ga4FetchMonthly_(property, startDate, endDate){
   return out;
 }
 
+/******************************** MATOMO (pour visites post-2025) ***********/
+function SITE_matomoFetch_(params) {
+  const token = SITE_getMatomoToken_();
+  const MATOMO_BASE_URL = 'https://matomo.aleo.agency';
+  const MATOMO_SITE_ID = 1492;
+  const full = { module: 'API', format: 'JSON', token_auth: token, idSite: String(MATOMO_SITE_ID), ...params };
+  const qs = Object.keys(full).map(k => encodeURIComponent(k) + '=' + encodeURIComponent(full[k])).join('&');
+  const url = `${MATOMO_BASE_URL}/index.php?${qs}`;
+  
+  Logger.log(`[Matomo Fetch] Appel de l'URL : ${url}`);
+
+  const res = UrlFetchApp.fetch(url, { method: 'get', muteHttpExceptions: true });
+  const responseCode = res.getResponseCode();
+  const responseBody = res.getContentText();
+
+  Logger.log(`[Matomo Fetch] Code de réponse : ${responseCode}`);
+  Logger.log(`[Matomo Fetch] Réponse brute de l'API : ${responseBody}`);
+
+  if (responseCode >= 300) throw new Error(`Matomo HTTP ${responseCode}: ${responseBody}`);
+  return JSON.parse(res.getContentText());
+}
+
+function SITE_matomoFetchVisitsMonthly_(startDate, endDate) {
+  const dateRange = `${startDate},${endDate}`;
+  const segmentId = SITE_getMatomoSegmentId_();
+  // On utilise l'ID de segment `4` comme vous l'avez indiqué.
+  const segmentId = '4';
+
+  const params = {
+    method: 'VisitsSummary.get',
+    period: 'month',
+    date: dateRange,
+    format: 'JSON'
+    segment: `idsegment==${segmentId}`,
+    format: 'JSON',
+  };
+
+  if (segmentId) params.segment = `idsegment==${segmentId}`;
+
+  const resp = SITE_matomoFetch_(params);
+  return resp;
+}
 /******************************** Search Console ****************************/
 function gscQuery_(siteUrl, req) {
   if (typeof SearchConsole !== 'undefined' &&
@@ -790,19 +812,21 @@ function SITE_findBudgetColSafe_(sheet) {
   return 0;
 }
 
+// VRAI si la colonne est listée comme ayant une formule dans Sheet_Structures.md
 function SITE_isProtectedHeader_(sh, col) {
   if (!col) return false;
   const headerVal = sh.getRange(HEADERS_ROW_SITE, col).getValue();
   const h = SITE__normHeader_(headerVal);
 
-  // 🟢 Colonnes autorisées même si elles contiennent "contact", "lead", etc.
-  // -> on VEUT que le script les remplisse
-  if (/(taux de conversion contact|taux de conversion lead)/.test(h)) {
-    return false;
-  }
+  // Liste EXACTE des colonnes avec formules pour "Site Internet"
+  // tirée de Sheet_Structures.md
+  const protectedHeaders = [
+    'nombre de lead', 'nombre de contacts', 'ctr',
+    'montant moyen signature', 'total montant signe', 'nombre de signature'
+  ].map(SITE__normHeader_);
 
-  // 🟥 Colonnes vraiment protégées (formules ou KPI manuels)
-  return /(contact|contacts|lead|leads|signature|signatures|roas|roi|cpl|cout par contact|coût par contact|montant signe|montant signé)/.test(h);
+  // La colonne est protégée si son nom normalisé est dans la liste.
+  return protectedHeaders.includes(h);
 }
 
 
@@ -848,101 +872,49 @@ function SITE_findCols_(sh){
 }
 
 
-function SITE_writeMonthRow_(sh, cols, ymKey, values){
+function SITE_writeMonthRow_(sh, cols, ymKey, values) {
   const row = SITE__findOrInsertMonthRow_(sh, cols.mois, ymKey);
-  sh.getRange(row, cols.mois).setValue(SITE_monthKeyToFr_(ymKey));
 
-  // Écritures autorisées (avec garde-fou sur les headers)
-  if (cols.impr && values.impressions != null && !SITE_isProtectedHeader_(sh, cols.impr)) {
-    sh.getRange(row, cols.impr).setValue(values.impressions);
+  // 1. Préparer toutes les valeurs à écrire dans un "plan d'écriture"
+  const writePlan = {};
+
+  // Données brutes des APIs
+  if (values.impressions != null) writePlan[cols.impr] = { value: values.impressions, format: null };
+  if (values.sessions != null) writePlan[cols.visits] = { value: values.sessions, format: null };
+  if (values.avgSec != null) writePlan[cols.dur] = { value: values.avgSec / 86400, format: '[h]:mm:ss' };
+  if (values.calls != null) writePlan[cols.appels] = { value: values.calls, format: null };
+  if (values.forms != null) writePlan[cols.forms] = { value: values.forms, format: null };
+  if (values.leadCalls != null) writePlan[cols.appelsLead] = { value: values.leadCalls, format: null };
+  if (values.leadForms != null) writePlan[cols.formsLead] = { value: values.leadForms, format: null };
+  if (values.bounce != null) writePlan[cols.bounce] = { value: values.bounce, format: '0.00%' };
+  if (values.avgPos != null) writePlan[cols.pos] = { value: isNaN(values.avgPos) ? 'Pas de données' : values.avgPos, format: '0.00' };
+
+  // Données calculées par le script
+  const impressions = values.impressions ?? Number(sh.getRange(row, cols.impr).getValue() || 0);
+  const sessions = values.sessions ?? Number(sh.getRange(row, cols.visits).getValue() || 0);
+  const contacts = (values.calls ?? Number(sh.getRange(row, cols.appels).getValue() || 0)) + (values.forms ?? Number(sh.getRange(row, cols.forms).getValue() || 0));
+  const leads = (values.leadCalls ?? Number(sh.getRange(row, cols.appelsLead).getValue() || 0)) + (values.leadForms ?? Number(sh.getRange(row, cols.formsLead).getValue() || 0));
+
+  if (impressions > 0) writePlan[cols.ctr] = { value: sessions / impressions, format: '0.00%' };
+  if (sessions > 0) {
+    writePlan[cols.convContact] = { value: contacts / sessions, format: '0.00%' };
+    writePlan[cols.convLead] = { value: leads / sessions, format: '0.00%' };
   }
 
-  if (cols.visits && values.sessions != null && !SITE_isProtectedHeader_(sh, cols.visits)) {
-    sh.getRange(row, cols.visits).setValue(values.sessions);
-  }
+  // 2. Exécuter le plan d'écriture, cellule par cellule
+  setPreserveFormula_(sh, row, cols.mois, SITE_monthKeyToFr_(ymKey)); // Toujours écrire le mois
 
-  if (cols.dur && values.avgSec != null && !SITE_isProtectedHeader_(sh, cols.dur)) {
-    SITE_setSecondsAsDuration_(sh, row, cols.dur, values.avgSec);
-  }
-
-  if (cols.appels && values.calls != null && !SITE_isProtectedHeader_(sh, cols.appels)) {
-    sh.getRange(row, cols.appels).setValue(values.calls);
-  }
-
-  if (cols.forms && values.forms != null && !SITE_isProtectedHeader_(sh, cols.forms)) {
-    sh.getRange(row, cols.forms).setValue(values.forms);
-  }
-
-  if (cols.appelsLead && values.leadCalls != null && !SITE_isProtectedHeader_(sh, cols.appelsLead)) {
-    sh.getRange(row, cols.appelsLead).setValue(values.leadCalls);
-  }
-
-  if (cols.formsLead && values.leadForms != null && !SITE_isProtectedHeader_(sh, cols.formsLead)) {
-    sh.getRange(row, cols.formsLead).setValue(values.leadForms);
-  }
-
-  if (cols.bounce && values.bounce != null && !SITE_isProtectedHeader_(sh, cols.bounce)) {
-    sh.getRange(row, cols.bounce).setValue(values.bounce).setNumberFormat('0.00%');
-  }
-
-  // Position moyenne (OK, donnée brute)
-  if (cols.pos && !SITE_isProtectedHeader_(sh, cols.pos)) {
-    if (values.avgPos == null || isNaN(values.avgPos)) {
-      sh.getRange(row, cols.pos).setValue('Pas de données');
-    } else {
-      sh.getRange(row, cols.pos).setValue(values.avgPos).setNumberFormat('0.00');
+  for (const col in writePlan) {
+    if (!col || col === '0') continue; // Ignore si la colonne n'a pas été trouvée
+    if (SITE_isProtectedHeader_(sh, col)) {
+      Logger.log(`[PROTECTED] Colonne ${sh.getRange(HEADERS_ROW_SITE, col).getValue()} ignorée car protégée.`);
+      continue;
     }
-  }
-
-  // ===================== MÉTRIQUES DÉRIVÉES =====================
-
-  // Sessions & impressions "fiables" (on combine ce qu'on vient d'écrire + ce qui existait déjà)
-  const sessions = (values.sessions ??
-    Number(cols.visits ? sh.getRange(row, cols.visits).getValue() : 0)) || 0;
-
-  const impressions = (values.impressions ??
-    Number(cols.impr ? sh.getRange(row, cols.impr).getValue() : 0)) || 0;
-
-  // 1) CTR = sessions / impressions
-  if (cols.ctr && !SITE_isProtectedHeader_(sh, cols.ctr)) {
-    const ctr = impressions > 0 ? (sessions / impressions) : 0;
-    sh.getRange(row, cols.ctr).setValue(ctr).setNumberFormat('0.00%');
-  }
-
-  // 2) Taux de conversion CONTACT = Nombre de contacts / sessions
-  if (cols.convContact && !SITE_isProtectedHeader_(sh, cols.convContact)) {
-    const contactsExisting = Number(
-      cols.contacts ? sh.getRange(row, cols.contacts).getValue() : 0
-    ) || 0;
-    const convContact = sessions > 0 ? (contactsExisting / sessions) : 0;
-    sh.getRange(row, cols.convContact).setValue(convContact).setNumberFormat('0.00%');
-  }
-
-  // 3) Taux de conversion LEAD = (Appels lead + Formulaires lead) / sessions
-  if (cols.convLead && !SITE_isProtectedHeader_(sh, cols.convLead)) {
-    const leadCalls = (values.leadCalls != null)
-      ? values.leadCalls
-      : Number(cols.appelsLead ? sh.getRange(row, cols.appelsLead).getValue() : 0) || 0;
-
-    const leadForms = (values.leadForms != null)
-      ? values.leadForms
-      : Number(cols.formsLead ? sh.getRange(row, cols.formsLead).getValue() : 0) || 0;
-
-    const leadTotal = leadCalls + leadForms;
-    const convLead = sessions > 0 ? (leadTotal / sessions) : 0;
-    sh.getRange(row, cols.convLead).setValue(convLead).setNumberFormat('0.00%');
-  }
-
-  // 4) Rétrocompat : si tu as encore une colonne "Taux de conversion" générique (conv)
-  if (cols.conv && !SITE_isProtectedHeader_(sh, cols.conv)
-      && !cols.convContact && !cols.convLead) {
-    const contactsExisting = Number(
-      cols.contacts ? sh.getRange(row, cols.contacts).getValue() : 0
-    ) || 0;
-    const conv = sessions > 0 ? (contactsExisting / sessions) : 0;
-    sh.getRange(row, cols.conv).setValue(conv).setNumberFormat('0.00%');
+    const { value, format } = writePlan[col];
+    setPreserveFormula_(sh, row, col, value, format);
   }
 }
+
 
 /**************************** RUNNERS ***************************************/
 const SITE_MONTHS_BACK = 21;
@@ -958,6 +930,7 @@ function run_Site_FullHistory(){
   const end   = new Date(today.getFullYear(), today.getMonth(), 0);
   const startStr = Utilities.formatDate(start, Session.getScriptTimeZone(), 'yyyy-MM-dd');
   const endStr   = Utilities.formatDate(end,   Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const matomoCutoffDate = new Date(2025, 10, 1); // 1er Novembre 2025
 
   SITE_toast_('Site: collecte…','Site Internet',4);
 
@@ -965,6 +938,16 @@ function run_Site_FullHistory(){
   const gsc = SITE_executeWithRetry_(()=>gscFetchMonthly_(GSC_SITE_URL, startStr, endStr),'GSC monthly');
   const callsByMonth = SITE_executeWithRetry_(()=>SITE_magnetisAggregateMonthlyCounts_(SITE_magnetisFetchCalls_(start, end)),'Magnetis calls');
   const formsByMonth = SITE_executeWithRetry_(()=>SITE_formsCountsByMonth_(new Date(Date.UTC(start.getFullYear(),start.getMonth(),1)), new Date(Date.UTC(end.getFullYear(),end.getMonth(),end.getDate(),23,59,59))),'Forms (Paper+Monday)');
+
+  let matomoVisits = {};
+  // On ne lance l'appel Matomo que si la période de fin est après la date de bascule
+  if (end >= matomoCutoffDate) {
+    const matomoStartDate = start > matomoCutoffDate ? start : matomoCutoffDate;
+    const matomoStartStr = Utilities.formatDate(matomoStartDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    matomoVisits = SITE_executeWithRetry_(
+      () => SITE_matomoFetchVisitsMonthly_(matomoStartStr, endStr), 'Matomo Visits'
+    );
+  }
 
   const leadCallsByMonth = SITE_executeWithRetry_(
     ()=>SITE_mondayLeadCallsCountsByMonth_(
@@ -997,8 +980,12 @@ function run_Site_FullHistory(){
   const cpAvg = SITE_executeWithRetry_(()=>SITE_cpMonthlyAvgBatch_(SITE_CP_DOMAIN, keys),'CheckPosition monthly avg');
 
   keys.forEach(ym=>{
+    const monthDate = new Date(parseInt(ym.slice(0,4)), parseInt(ym.slice(5,7)) - 1, 1);
+    const useMatomo = monthDate >= matomoCutoffDate;
+
     const values = {
-      sessions:    ga[ym]?.sessions ?? null,
+      // Utilise Matomo pour les sessions si la date est >= Nov 2025, sinon GA4
+      sessions:    useMatomo ? (matomoVisits[ym]?.[0] ?? null) : (ga[ym]?.sessions ?? null),
       avgSec:      ga[ym]?.avgSec ?? null,
       impressions: gsc[ym]?.impressions ?? null,
       calls:       callsByMonth[ym] ?? null,
@@ -1026,11 +1013,23 @@ function run_Site_AddLastMonth(){
   const ymKey = Utilities.formatDate(start, Session.getScriptTimeZone(), 'yyyy-MM');
   const startStr = Utilities.formatDate(start, Session.getScriptTimeZone(), 'yyyy-MM-dd');
   const endStr   = Utilities.formatDate(end,   Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const matomoCutoffDate = new Date(2025, 10, 1); // 1er Novembre 2025
+  const useMatomo = start >= matomoCutoffDate;
 
-  const ga  = SITE_executeWithRetry_(()=>ga4FetchMonthly_(GA4_PROPERTY, startStr, endStr),'GA4 N-1');
+  let sessionsData;
+  if (useMatomo) {
+    sessionsData = SITE_executeWithRetry_(() => SITE_matomoFetchVisitsMonthly_(startStr, endStr), 'Matomo N-1');
+  } else {
+    sessionsData = SITE_executeWithRetry_(() => ga4FetchMonthly_(GA4_PROPERTY, startStr, endStr), 'GA4 N-1');
+  }
+
   const gsc = SITE_executeWithRetry_(()=>gscFetchMonthly_(GSC_SITE_URL, startStr, endStr),'GSC N-1');
   const callsByMonth = SITE_executeWithRetry_(()=>SITE_magnetisAggregateMonthlyCounts_(SITE_magnetisFetchCalls_(start, end)),'Magnetis N-1');
   const formsByMonth = SITE_executeWithRetry_(()=>SITE_formsCountsByMonth_(new Date(Date.UTC(start.getFullYear(),start.getMonth(),1)), new Date(Date.UTC(end.getFullYear(),end.getMonth(),end.getDate(),23,59,59))),'Forms N-1');
+
+  // Pour la durée moyenne, on continue d'utiliser GA4 pour l'instant
+  // Si vous souhaitez aussi la basculer sur Matomo, il faudra une logique similaire
+  const gaForDuration = SITE_executeWithRetry_(()=>ga4FetchMonthly_(GA4_PROPERTY, startStr, endStr),'GA4 N-1 (duration)');
 
   const leadCallsByMonth = SITE_executeWithRetry_(
     ()=>SITE_mondayLeadCallsCountsByMonth_(
@@ -1058,15 +1057,15 @@ function run_Site_AddLastMonth(){
   const avgPos = SITE_executeWithRetry_(()=>SITE_cpMonthlyAveragePosition_(SITE_CP_DOMAIN, ymKey, null),'CheckPosition N-1');
 
   const values = {
-    sessions:    ga[ymKey]?.sessions ?? null,
-    avgSec:      ga[ymKey]?.avgSec ?? null,
+    sessions:    useMatomo ? (sessionsData[ymKey]?.[0] ?? null) : (sessionsData[ymKey]?.sessions ?? null),
+    avgSec:      gaForDuration[ymKey]?.avgSec ?? null,
     impressions: gsc[ymKey]?.impressions ?? null,
     calls:       callsByMonth[ymKey] ?? null,
     forms:       formsByMonth[ymKey] ?? null,
     leadCalls:   leadCallsByMonth[ymKey] ?? null,
     leadForms:   leadFormsByMonth[ymKey] ?? null,
     avgPos:      avgPos ?? null,
-    bounce:      ga[ymKey]?.bouncePct ?? null
+    bounce:      gaForDuration[ymKey]?.bouncePct ?? null
   };
   SITE_writeMonthRow_(sh, cols, ymKey, values);
 
@@ -1358,11 +1357,22 @@ function run_Site_CurrentMonth(){
   const ymKey = Utilities.formatDate(start, Session.getScriptTimeZone(), 'yyyy-MM');
   const startStr = Utilities.formatDate(start, Session.getScriptTimeZone(), 'yyyy-MM-dd');
   const endStr   = Utilities.formatDate(end,   Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const matomoCutoffDate = new Date(2025, 10, 1); // 1er Novembre 2025
+  const useMatomo = start >= matomoCutoffDate;
 
   SITE_toast_(`Site: mise à jour du mois en cours ${SITE_monthKeyToFr_(ymKey)}…`,'Site Internet',4);
 
-  // GA4 & GSC sur la plage [1er du mois -> aujourd'hui]
-  const ga  = SITE_executeWithRetry_(()=>ga4FetchMonthly_(GA4_PROPERTY, startStr, endStr),'GA4 mois en cours');
+  let sessionsData;
+  if (useMatomo) {
+    sessionsData = SITE_executeWithRetry_(() => SITE_matomoFetchVisitsMonthly_(startStr, endStr), 'Matomo mois en cours');
+  } else {
+    sessionsData = SITE_executeWithRetry_(() => ga4FetchMonthly_(GA4_PROPERTY, startStr, endStr), 'GA4 mois en cours');
+  }
+
+  // Pour la durée moyenne et le taux de rebond, on continue d'utiliser GA4 pour l'instant
+  const gaForOtherMetrics = SITE_executeWithRetry_(()=>ga4FetchMonthly_(GA4_PROPERTY, startStr, endStr),'GA4 mois en cours (metrics)');
+
+
   const gsc = SITE_executeWithRetry_(()=>gscFetchMonthly_(GSC_SITE_URL, startStr, endStr),'GSC mois en cours');
 
   // Appels Magnetis (filtrés "Tout le SEO")
@@ -1411,15 +1421,15 @@ function run_Site_CurrentMonth(){
   );
 
   const values = {
-    sessions:    ga[ymKey]?.sessions ?? null,
-    avgSec:      ga[ymKey]?.avgSec ?? null,
+    sessions:    useMatomo ? (sessionsData[ymKey]?.[0] ?? null) : (sessionsData[ymKey]?.sessions ?? null),
+    avgSec:      gaForOtherMetrics[ymKey]?.avgSec ?? null,
     impressions: gsc[ymKey]?.impressions ?? null,
     calls:       callsByMonth[ymKey] ?? null,
     forms:       formsByMonth[ymKey] ?? null,
     leadCalls:   leadCallsByMonth[ymKey] ?? null,
     leadForms:   leadFormsByMonth[ymKey] ?? null,
     avgPos:      avgPos ?? null,
-    bounce:      ga[ymKey]?.bouncePct ?? null
+    bounce:      gaForOtherMetrics[ymKey]?.bouncePct ?? null
   };
 
   // ⚠️ SITE_writeMonthRow_ gère déjà :
