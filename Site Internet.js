@@ -484,10 +484,11 @@ function SITE_resolveTwoCols_(boardId, titleOrId1, titleOrId2) {
 }
 
 // Appels lead
-// { 'YYYY-MM': n } — APPELS lead = Source match + Type "appel" (date=colonne Date si dispo sinon created_at)
-function SITE_mondayLeadCallsCountsByMonth_(boardId, colSource, colType, fromUTC, toUTC) {
+// { 'YYYY-MM': n } — APPELS lead = Source match + Type "appel" + Statut "Lead"
+function SITE_mondayLeadCallsCountsByMonth_(boardId, colSource, colType, colStatus, fromUTC, toUTC) {
   const sourceId = SITE_mondayResolveColumnId_(boardId, colSource);
   const typeId = SITE_mondayResolveColumnId_(boardId, colType);
+  const statusId = colStatus ? SITE_mondayResolveColumnId_(boardId, colStatus) : null;
   const dateId = (typeof SITE_MONDAY_LEADS_COL_DATE !== 'undefined' && SITE_MONDAY_LEADS_COL_DATE)
     ? SITE_mondayResolveColumnId_(boardId, SITE_MONDAY_LEADS_COL_DATE)
     : null;
@@ -509,7 +510,7 @@ function SITE_mondayLeadCallsCountsByMonth_(boardId, colSource, colType, fromUTC
           }
         }
       }`;
-    const colIds = [sourceId, typeId].concat(dateId ? [dateId] : []);
+    const colIds = [sourceId, typeId].concat(statusId ? [statusId] : []).concat(dateId ? [dateId] : []);
     const d = Utils_mondayGraphQL(q, { bid: [Number(boardId)], cursor, cols: colIds });
     const page = d && d.boards && d.boards[0] && d.boards[0].items_page; if (!page) break;
 
@@ -520,6 +521,7 @@ function SITE_mondayLeadCallsCountsByMonth_(boardId, colSource, colType, fromUTC
       const cv = it.column_values || [];
       const srcText = (cv.find(c => c.id === sourceId) || {}).text || '';
       const typText = (cv.find(c => c.id === typeId) || {}).text || '';
+      const sts = statusId ? ((cv.find(c => c.id === statusId) || {}).text || '') : '';
       const dcv = dateId ? ((cv.find(c => c.id === dateId) || {}).value || '') : '';
       const when = SITE_parseMondayDateValue_(dcv) || createdAt;
 
@@ -529,6 +531,8 @@ function SITE_mondayLeadCallsCountsByMonth_(boardId, colSource, colType, fromUTC
       const sourceMatch = Utils_textEqualsAny(srcText, SITE_MONDAY_LEADS_SOURCE_MATCH);
       // Type : doit contenir "appel"
       const typeMatch = Utils_textIncludesAny(typText, SITE_MONDAY_LEADS_TYPE_MATCH);
+      // ★ NOUVEAU : Statut doit être "Lead" si statusId fourni
+      if (statusId && !Utils_textIncludesAny(sts, SITE_MONDAY_LEADS_STATUS_MATCH)) return;
 
       if (sourceMatch && typeMatch) {
         const key = when.getUTCFullYear() + '-' + String(when.getUTCMonth() + 1).padStart(2, '0');
@@ -1002,6 +1006,7 @@ function run_Site_TestLeads() {
     SITE_MONDAY_LEADS_BOARD_ID,
     SITE_MONDAY_LEADS_COL_SOURCE,
     SITE_MONDAY_LEADS_COL_TYPE,
+    SITE_MONDAY_LEADS_COL_STATUS,
     fromUTC, toUTC
   );
   const formsByMonth = SITE_mondayLeadFormsCountsByMonth_(
