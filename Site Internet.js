@@ -1241,6 +1241,7 @@ function run_Site_CurrentMonth() {
     impressions: gsc[ymKey]?.impressions ?? null,
     calls: callsByMonth[ymKey] ?? null,
     forms: formsByMonth[ymKey] ?? null,
+    leadCalls: leadCallsByMonth[ymKey] ?? null,
     leadForms: leadFormsByMonth[ymKey] ?? null,
     bounce: gaForOtherMetrics[ymKey]?.bouncePct ?? null
   };
