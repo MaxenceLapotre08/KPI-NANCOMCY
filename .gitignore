@@ -3,3 +3,22 @@
 
 # Dépendances Node.js (si vous utilisez des packages)
 node_modules/
+
+# Logs locaux
+*.log
+logs/
+
+# Fichiers temporaires
+*.tmp
+.DS_Store
+Thumbs.db
+
+# Environnement
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

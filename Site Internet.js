@@ -7,39 +7,18 @@ const START_ROW_SITE = 6;
 const GA4_PROPERTY = 'properties/333690282';
 const GSC_SITE_URL = 'https://www.nancomcy.fr/';
 
-
-
 /****************************** CONFIG MATOMO *******************************/
-function SITE_getMatomoToken_() {
-  const t = PropertiesService.getScriptProperties().getProperty('MATOMO_TOKEN');
-  if (!t) throw new Error("Propriété 'MATOMO_TOKEN' manquante.");
-  return t;
-}
-
-function SITE_getMatomoSegmentId_() {
-  const id = PropertiesService.getScriptProperties().getProperty('MATOMO_SEGMENT_ID');
-  // Si aucun ID n'est défini, on n'applique pas de segment.
-  return id || null;
-}
+// Tokens maintenant gérés par Utils.js via Utils_getMatomoToken() et Utils_getMatomoSegmentId()
 
 /****************************** CONFIG MAGNETIS *****************************/
-function SITE_getMagApiKey_() {
-  const k = PropertiesService.getScriptProperties().getProperty('MAGNETIS_API_KEY');
-  if (!k) throw new Error("Propriété 'MAGNETIS_API_KEY' manquante.");
-  return k;
-}
+// Token maintenant géré par Utils.js via Utils_getMagnetisApiKey()
 const SITE_MAG_FILTER_CHANNELS = ['Tout le SEO'];
 const SITE_MAG_MATCH_MODE = 'equals';
 const SITE_MAG_COUNT_ANSWERED_ONLY = false;
 
 /****************************** CONFIG PAPERFORM ****************************/
 const SITE_PAPERFORM_FORM_IDS = ['xuefmtzg'];
-function SITE_getPaperformToken_() {
-  const props = PropertiesService.getScriptProperties();
-  const t = props.getProperty('PAPARFORM_TOKEN') || props.getProperty('PAPERFORM_TOKEN');
-  if (!t) throw new Error("Propriété 'PAPARFORM_TOKEN' (ou 'PAPERFORM_TOKEN') manquante.");
-  return t;
-}
+// Token maintenant géré par Utils.js via Utils_getPaperformToken()
 
 /****************************** CONFIG MONDAY (forms) ************************/
 const SITE_MONDAY_BOARD_ID = 9950271520;
@@ -48,11 +27,7 @@ const SITE_MONDAY_FORM_COLUMN_ID = '';
 const SITE_MONDAY_MATCH_MODE = 'nonempty';
 const SITE_MONDAY_MATCH_VALUES = [];
 
-function SITE_getMondayToken_() {
-  const t = PropertiesService.getScriptProperties().getProperty('MONDAY_TOKEN');
-  if (!t) throw new Error("Propriété 'MONDAY_TOKEN' manquante.");
-  return t;
-}
+// Token Monday maintenant géré par Utils.js via Utils_getMondayToken()
 
 /************* CONFIG MONDAY (leads: appels + formulaires) ******************/
 const SITE_MONDAY_LEADS_BOARD_ID = SITE_MONDAY_BOARD_ID;
@@ -164,7 +139,7 @@ function ga4FetchMonthly_(property, startDate, endDate) {
 
 /******************************** MATOMO (pour visites post-2025) ***********/
 function SITE_matomoFetch_(params) {
-  const token = SITE_getMatomoToken_();
+  const token = Utils_getMatomoToken();
   const MATOMO_BASE_URL = 'https://matomo.aleo.agency';
   const MATOMO_SITE_ID = 1492;
   const full = { module: 'API', format: 'JSON', token_auth: token, idSite: String(MATOMO_SITE_ID), ...params };
@@ -205,7 +180,7 @@ function SITE_matomoGetSegmentDefinition_(segmentId) {
 
 function SITE_matomoFetchVisitsMonthly_(startDate, endDate) {
   const dateRange = `${startDate},${endDate}`;
-  const segmentId = SITE_getMatomoSegmentId_();
+  const segmentId = Utils_getMatomoSegmentId();
 
   Logger.log(`[Matomo Visits] Période: ${dateRange}, Segment ID récupéré: ${segmentId}`);
 
@@ -231,6 +206,42 @@ function SITE_matomoFetchVisitsMonthly_(startDate, endDate) {
   const resp = SITE_matomoFetch_(params);
   return resp;
 }
+
+/**
+ * Transforme la réponse Matomo en format compatible avec le reste du code.
+ * Matomo retourne: { "2025-11": { nb_visits: 123, nb_actions: 456, ... } }
+ * On transforme en: { "2025-11": { sessions: 123 } }
+ * @param {object} matomoResp - Réponse brute de l'API Matomo
+ * @returns {object} Objet avec format { "YYYY-MM": { sessions: number } }
+ */
+function SITE_parseMatomoVisitsResponse_(matomoResp) {
+  if (!matomoResp || typeof matomoResp !== 'object') {
+    Logger.log('[Matomo Parse] Réponse vide ou invalide');
+    return {};
+  }
+
+  const result = {};
+
+  for (const monthKey in matomoResp) {
+    const data = matomoResp[monthKey];
+
+    // Si c'est un message d'erreur Matomo (string)
+    if (data && typeof data === 'string') {
+      Logger.log(`[Matomo Parse] Message pour ${monthKey}: ${data}`);
+      continue;
+    }
+
+    // Extraire nb_visits et le mapper à "sessions"
+    if (data && typeof data === 'object') {
+      const sessions = Number(data.nb_visits || 0);
+      result[monthKey] = { sessions };
+      Logger.log(`[Matomo Parse] ${monthKey}: ${sessions} visites`);
+    }
+  }
+
+  return result;
+}
+
 /******************************** Search Console ****************************/
 function gscQuery_(siteUrl, req) {
   if (typeof SearchConsole !== 'undefined' &&
@@ -299,7 +310,7 @@ function SITE_magChannelOk_(name) {
   }
 }
 function SITE_magnetisFetchCalls_(fromDate, toDate) {
-  const apiKey = SITE_getMagApiKey_();
+  const apiKey = Utils_getMagnetisApiKey();
   const base = 'https://api.magnetis.io/calls';
   const fmtUTC = d => Utilities.formatDate(d, 'UTC', 'yyyyMMddHHmmss');
   let start = new Date(fromDate), end = new Date(toDate);
@@ -377,7 +388,7 @@ function SITE_getSubmissionDate_(s) {
   return new Date(NaN);
 }
 function SITE_paperformFetchSubmissionsInRange_(slugOrId, fromDate, toDate) {
-  const token = SITE_getPaperformToken_();
+  const token = Utils_getPaperformToken();
   const base = `https://api.paperform.co/v1/forms/${encodeURIComponent(slugOrId)}/submissions`;
   const limit = 100; let all = []; let mode = 'skip', skip = 0, page = 1;
   const fromTs = fromDate.getTime(), toTs = toDate.getTime();
@@ -409,25 +420,14 @@ function SITE_paperformCountsByMonth_(fromDate, toDate) {
 
 /******************************** Monday (général) **************************/
 
-function SITE_mondayGraphQL_(query, variables) {
-  const res = UrlFetchApp.fetch('https://api.monday.com/v2', {
-    method: 'post',
-    headers: { 'Content-Type': 'application/json', 'Authorization': SITE_getMondayToken_(), 'API-Version': '2023-10' },
-    payload: JSON.stringify({ query, variables: variables || {} }),
-    muteHttpExceptions: true
-  });
-  if (res.getResponseCode() >= 300) throw new Error(`Monday HTTP ${res.getResponseCode()}: ${res.getContentText()}`);
-  const body = JSON.parse(res.getContentText());
-  if (body.errors) throw new Error('Monday GraphQL error: ' + JSON.stringify(body.errors));
-  return body.data;
-}
+// Fonction mondayGraphQL maintenant centralisée dans Utils.js via Utils_mondayGraphQL()
 function SITE_mondayResolveColumnId_(boardId, titleOrId) {
   if (!titleOrId) return '';
   const looksId = /^[a-z0-9_]+$/i.test(titleOrId) && !Utils_normHeader(titleOrId).includes(' ');
   if (looksId) return titleOrId;
   const want = Utils_normHeader(titleOrId);
   const q = `query($bid:[ID!]){ boards(ids:$bid){ columns{ id title type } } }`;
-  const d = SITE_mondayGraphQL_(q, { bid: [Number(boardId)] });
+  const d = Utils_mondayGraphQL(q, { bid: [Number(boardId)] });
   const cols = (d && d.boards && d.boards[0] && d.boards[0].columns) || [];
   let best = '';
   for (const c of cols) { if (Utils_normHeader(c.title) === want) { best = c.id; break; } }
@@ -456,7 +456,7 @@ function SITE_mondayFormCountsByMonth_(boardId, colTitleOrId, fromUTC, toUTC) {
           }
         }
       }`;
-    const d = SITE_mondayGraphQL_(q, { bid: [Number(boardId)], cursor, col: [colId] });
+    const d = Utils_mondayGraphQL(q, { bid: [Number(boardId)], cursor, col: [colId] });
     const page = d && d.boards && d.boards[0] && d.boards[0].items_page;
     if (!page) break;
     (page.items || []).forEach(it => {
@@ -510,7 +510,7 @@ function SITE_mondayLeadCallsCountsByMonth_(boardId, colSource, colType, fromUTC
         }
       }`;
     const colIds = [sourceId, typeId].concat(dateId ? [dateId] : []);
-    const d = SITE_mondayGraphQL_(q, { bid: [Number(boardId)], cursor, cols: colIds });
+    const d = Utils_mondayGraphQL(q, { bid: [Number(boardId)], cursor, cols: colIds });
     const page = d && d.boards && d.boards[0] && d.boards[0].items_page; if (!page) break;
 
     (page.items || []).forEach(it => {
@@ -568,7 +568,7 @@ function SITE_mondayLeadFormsCountsByMonth_(boardId, colSource, colType, colStat
         }
       }`;
     const colIds = [sourceId, typeId].concat(statusId ? [statusId] : []).concat(dateId ? [dateId] : []);
-    const d = SITE_mondayGraphQL_(q, { bid: [Number(boardId)], cursor, cols: colIds });
+    const d = Utils_mondayGraphQL(q, { bid: [Number(boardId)], cursor, cols: colIds });
     const page = d && d.boards && d.boards[0] && d.boards[0].items_page; if (!page) break;
 
     (page.items || []).forEach(it => {
@@ -763,9 +763,10 @@ function run_Site_FullHistory() {
   if (end >= matomoCutoffDate) {
     const matomoStartDate = start > matomoCutoffDate ? start : matomoCutoffDate;
     const matomoStartStr = Utilities.formatDate(matomoStartDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-    matomoVisits = Utils_executeWithRetry(
+    const rawMatomo = Utils_executeWithRetry(
       () => SITE_matomoFetchVisitsMonthly_(matomoStartStr, endStr), 'Matomo Visits'
     );
+    matomoVisits = SITE_parseMatomoVisitsResponse_(rawMatomo);
   }
 
   const leadCallsByMonth = Utils_executeWithRetry(
@@ -804,7 +805,7 @@ function run_Site_FullHistory() {
 
     const values = {
       // Utilise Matomo pour les sessions si la date est >= Nov 2025, sinon GA4
-      sessions: useMatomo ? (matomoVisits[ym]?.[0] ?? null) : (ga[ym]?.sessions ?? null),
+      sessions: useMatomo ? (matomoVisits[ym]?.sessions ?? null) : (ga[ym]?.sessions ?? null),
       avgSec: ga[ym]?.avgSec ?? null,
       impressions: gsc[ym]?.impressions ?? null,
       calls: callsByMonth[ym] ?? null,
@@ -836,7 +837,8 @@ function run_Site_AddLastMonth() {
 
   let sessionsData;
   if (useMatomo) {
-    sessionsData = Utils_executeWithRetry(() => SITE_matomoFetchVisitsMonthly_(startStr, endStr), 'Matomo N-1');
+    const rawMatomo = Utils_executeWithRetry(() => SITE_matomoFetchVisitsMonthly_(startStr, endStr), 'Matomo N-1');
+    sessionsData = SITE_parseMatomoVisitsResponse_(rawMatomo);
   } else {
     sessionsData = Utils_executeWithRetry(() => ga4FetchMonthly_(GA4_PROPERTY, startStr, endStr), 'GA4 N-1');
   }
@@ -875,7 +877,7 @@ function run_Site_AddLastMonth() {
 
 
   const values = {
-    sessions: useMatomo ? (sessionsData[ymKey]?.[0] ?? null) : (sessionsData[ymKey]?.sessions ?? null),
+    sessions: sessionsData[ymKey]?.sessions ?? null,
     avgSec: gaForDuration[ymKey]?.avgSec ?? null,
     impressions: gsc[ymKey]?.impressions ?? null,
     calls: callsByMonth[ymKey] ?? null,
@@ -912,7 +914,7 @@ function SITE_mondayFetchLeadCallsItems_(boardId, colSource, colType, fromUTC, t
           }
         }
       }`;
-    const d = SITE_mondayGraphQL_(q, { bid: [Number(boardId)], cursor, cols: [sourceId, typeId] });
+    const d = Utils_mondayGraphQL(q, { bid: [Number(boardId)], cursor, cols: [sourceId, typeId] });
     const page = d && d.boards && d.boards[0] && d.boards[0].items_page;
     if (!page) break;
 
@@ -959,7 +961,7 @@ function SITE_mondayFetchLeadFormsItems_(boardId, colSource, colType, colStatus,
           }
         }
       }`;
-    const d = SITE_mondayGraphQL_(q, { bid: [Number(boardId)], cursor, cols: [sourceId, typeId, statusId] });
+    const d = Utils_mondayGraphQL(q, { bid: [Number(boardId)], cursor, cols: [sourceId, typeId, statusId] });
     const page = d && d.boards && d.boards[0] && d.boards[0].items_page;
     if (!page) break;
 
@@ -1090,7 +1092,7 @@ function run_Site_TestLeads_Debug() {
         }
       }`;
     const colIds = [sourceId, typeId].concat(statusId ? [statusId] : []).concat(dateId ? [dateId] : []);
-    const d = SITE_mondayGraphQL_(q, { bid: [Number(SITE_MONDAY_LEADS_BOARD_ID)], cursor, cols: colIds });
+    const d = Utils_mondayGraphQL(q, { bid: [Number(SITE_MONDAY_LEADS_BOARD_ID)], cursor, cols: colIds });
     const page = d && d.boards && d.boards[0] && d.boards[0].items_page; if (!page) break;
 
     (page.items || []).forEach(it => {
@@ -1180,7 +1182,8 @@ function run_Site_CurrentMonth() {
 
   let sessionsData;
   if (useMatomo) {
-    sessionsData = Utils_executeWithRetry(() => SITE_matomoFetchVisitsMonthly_(startStr, endStr), 'Matomo mois en cours');
+    const rawMatomo = Utils_executeWithRetry(() => SITE_matomoFetchVisitsMonthly_(startStr, endStr), 'Matomo mois en cours');
+    sessionsData = SITE_parseMatomoVisitsResponse_(rawMatomo);
   } else {
     sessionsData = Utils_executeWithRetry(() => ga4FetchMonthly_(GA4_PROPERTY, startStr, endStr), 'GA4 mois en cours');
   }
@@ -1233,7 +1236,7 @@ function run_Site_CurrentMonth() {
 
 
   const values = {
-    sessions: useMatomo ? (sessionsData[ymKey]?.[0] ?? null) : (sessionsData[ymKey]?.sessions ?? null),
+    sessions: sessionsData[ymKey]?.sessions ?? null,
     avgSec: gaForOtherMetrics[ymKey]?.avgSec ?? null,
     impressions: gsc[ymKey]?.impressions ?? null,
     calls: callsByMonth[ymKey] ?? null,

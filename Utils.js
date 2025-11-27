@@ -236,3 +236,108 @@ function Utils_textIncludesAny(txt, arr) {
 function Utils_textEquals(a, b) {
     return Utils_normHeader(a) === Utils_normHeader(b);
 }
+
+/**
+ * Récupère une propriété de script avec support de fallback et gestion d'erreurs.
+ * @param {string} key - Nom de la propriété principale
+ * @param {string[]} fallbackKeys - Noms alternatifs à essayer si la principale n'existe pas
+ * @param {boolean} required - Si true, lance une erreur si aucune propriété n'est trouvée
+ * @returns {string|null} Valeur de la propriété ou null
+ */
+function Utils_getProperty(key, fallbackKeys = [], required = true) {
+    const props = PropertiesService.getScriptProperties();
+    const value = props.getProperty(key);
+
+    if (value) return value;
+
+    // Essayer les fallbacks
+    for (const fallback of fallbackKeys) {
+        const val = props.getProperty(fallback);
+        if (val) {
+            Logger.log(`[WARN] Using fallback property '${fallback}' for '${key}'`);
+            return val;
+        }
+    }
+
+    if (required) {
+        const tried = [key, ...fallbackKeys].join(', ');
+        throw new Error(`Property '${key}' not found (tried: ${tried})`);
+    }
+
+    return null;
+}
+
+/**
+ * Récupère le token Matomo.
+ */
+function Utils_getMatomoToken() {
+    return Utils_getProperty('MATOMO_TOKEN');
+}
+
+/**
+ * Récupère l'ID du segment Matomo (optionnel).
+ */
+function Utils_getMatomoSegmentId() {
+    return Utils_getProperty('MATOMO_SEGMENT_ID', [], false);
+}
+
+/**
+ * Récupère l'API key Magnetis.
+ */
+function Utils_getMagnetisApiKey() {
+    return Utils_getProperty('MAGNETIS_API_KEY');
+}
+
+/**
+ * Récupère le token Paperform.
+ * Support de la typo historique PAPARFORM_TOKEN.
+ */
+function Utils_getPaperformToken() {
+    return Utils_getProperty('PAPERFORM_TOKEN', ['PAPARFORM_TOKEN']);
+}
+
+/**
+ * Récupère le token Monday.
+ */
+function Utils_getMondayToken() {
+    return Utils_getProperty('MONDAY_TOKEN');
+}
+
+/**
+ * Récupère le token Meta.
+ */
+function Utils_getMetaToken() {
+    return Utils_getProperty('META_TOKEN');
+}
+
+/**
+ * Exécute une requête GraphQL vers l'API Monday.com.
+ * @param {string} query - Requête GraphQL
+ * @param {object} variables - Variables de la requête
+ * @returns {object} Données de réponse
+ */
+function Utils_mondayGraphQL(query, variables) {
+    const token = Utils_getMondayToken();
+    const res = UrlFetchApp.fetch('https://api.monday.com/v2', {
+        method: 'post',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': token,
+            'API-Version': '2023-10'
+        },
+        payload: JSON.stringify({ query, variables: variables || {} }),
+        muteHttpExceptions: true
+    });
+
+    if (res.getResponseCode() >= 300) {
+        throw new Error(`Monday HTTP ${res.getResponseCode()}: ${res.getContentText()}`);
+    }
+
+    const body = JSON.parse(res.getContentText());
+    if (body.errors) {
+        throw new Error('Monday GraphQL error: ' + JSON.stringify(body.errors));
+    }
+
+    return body.data;
+}
+
