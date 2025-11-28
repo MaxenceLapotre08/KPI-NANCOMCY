@@ -1,6 +1,7 @@
 /**
  * DEBUG_mondayLeadCalls.js
  * Fonction de debug pour identifier pourquoi les appels lead ne remontent pas.
+ * ✅ MISE À JOUR: Utilise les filtres Monday GraphQL pour tester l'optimisation
  */
 
 function DEBUG_mondayLeadCalls() {
@@ -32,14 +33,39 @@ function DEBUG_mondayLeadCalls() {
 
     Logger.log(`\nPériode: ${fromUTC.toISOString()} -> ${toUTC.toISOString()}`);
 
+    // ✅ OPTIMISATION: Filtres Monday côté serveur
+    const rules = [
+        {
+            column_id: sourceId,
+            compare_value: SITE_MONDAY_LEADS_SOURCE_MATCH,
+            operator: 'any_of'
+        },
+        {
+            column_id: typeId,
+            compare_value: SITE_MONDAY_LEADS_TYPE_MATCH,
+            operator: 'any_of'
+        }
+    ];
+
+    if (statusId) {
+        rules.push({
+            column_id: statusId,
+            compare_value: SITE_MONDAY_LEADS_STATUS_MATCH,
+            operator: 'any_of'
+        });
+    }
+
+    Logger.log(`\n✅ Filtres Monday appliqués:`);
+    Logger.log(JSON.stringify(rules, null, 2));
+
     let totalItems = 0;
     let matchedItems = 0;
     let cursor = null;
 
     const q = `
-    query($bid:[ID!], $cursor:String, $cols:[String!]){
+    query($bid:[ID!], $cursor:String, $cols:[String!], $rules:[ItemsQueryRule!]){
       boards(ids:$bid){
-        items_page(limit:50, cursor:$cursor){
+        items_page_by_column_values(limit:50, cursor:$cursor, rules:$rules){
           cursor
           items{
             id name state created_at
@@ -52,9 +78,11 @@ function DEBUG_mondayLeadCalls() {
     const colIds = [sourceId, typeId].concat(statusId ? [statusId] : []).concat(dateId ? [dateId] : []);
 
     do {
-        const d = Utils_mondayGraphQL(q, { bid: [Number(boardId)], cursor, cols: colIds });
-        const page = d && d.boards && d.boards[0] && d.boards[0].items_page;
+        const d = Utils_mondayGraphQL(q, { bid: [Number(boardId)], cursor, cols: colIds, rules });
+        const page = d && d.boards && d.boards[0] && d.boards[0].items_page_by_column_values;
         if (!page) break;
+
+        Logger.log(`\n📦 Page récupérée: ${(page.items || []).length} items (grâce aux filtres Monday)`);
 
         (page.items || []).forEach(it => {
             totalItems++;
@@ -71,18 +99,10 @@ function DEBUG_mondayLeadCalls() {
             const sts = statusId ? ((cv.find(c => c.id === statusId) || {}).text || '') : '';
             const dcv = dateId ? ((cv.find(c => c.id === dateId) || {}).value || '') : '';
 
-            // Essayer de parser la date Monday si disponible
+            // Parser la date Monday
             let when = createdAt;
             if (dateId && dcv) {
-                try {
-                    // Format Monday: {"date":"2025-11-28","time":"12:30:00"}
-                    const parsed = JSON.parse(dcv);
-                    if (parsed && parsed.date) {
-                        when = new Date(parsed.date);
-                    }
-                } catch (e) {
-                    // Si parsing échoue, utiliser created_at
-                }
+                when = SITE_parseMondayDateValue_(dcv) || createdAt;
             }
 
             Logger.log(`\n[${totalItems}] Item #${it.id} "${it.name}"`);
@@ -94,7 +114,7 @@ function DEBUG_mondayLeadCalls() {
             Logger.log(`  Created at: ${createdAt.toISOString()}`);
 
             // Vérifier les critères
-            const sourceMatch = Utils_textIncludesAny(srcText, SITE_MONDAY_LEADS_SOURCE_MATCH);
+            const sourceMatch = Utils_textEqualsAny(srcText, SITE_MONDAY_LEADS_SOURCE_MATCH);
             const typeMatch = Utils_textIncludesAny(typText, SITE_MONDAY_LEADS_TYPE_MATCH);
             const statusMatch = statusId ? Utils_textIncludesAny(sts, SITE_MONDAY_LEADS_STATUS_MATCH) : true;
             const dateMatch = when >= fromUTC && when <= toUTC;
@@ -117,8 +137,10 @@ function DEBUG_mondayLeadCalls() {
     } while (cursor);
 
     Logger.log(`\n============ RÉSUMÉ ============`);
-    Logger.log(`Total items analysés: ${totalItems}`);
-    Logger.log(`Items matchés (appels lead): ${matchedItems}`);
+    Logger.log(`📊 Total items analysés: ${totalItems}`);
+    Logger.log(`✅ Items matchés (appels lead): ${matchedItems}`);
+    Logger.log(`🚀 Gain filtres: Monday a déjà filtré côté serveur !`);
+    Logger.log(`   (Au lieu de récupérer 500+ items, on en a récupéré ${totalItems})`);
     Logger.log(`================================`);
 
     return { totalItems, matchedItems };

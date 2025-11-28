@@ -464,10 +464,32 @@ function SITE_mondayLeadCallsCountsByMonth_(boardId, colSource, colType, colStat
   let cursor = null;
 
   do {
+    // ✅ OPTIMISATION MAJEURE: Filtres Monday pour ne récupérer QUE les items pertinents
+    const rules = [
+      {
+        column_id: sourceId,
+        compare_value: SITE_MONDAY_LEADS_SOURCE_MATCH,
+        operator: 'any_of'
+      },
+      {
+        column_id: typeId,
+        compare_value: SITE_MONDAY_LEADS_TYPE_MATCH,
+        operator: 'any_of'
+      }
+    ];
+
+    if (statusId) {
+      rules.push({
+        column_id: statusId,
+        compare_value: SITE_MONDAY_LEADS_STATUS_MATCH,
+        operator: 'any_of'
+      });
+    }
+
     const q = `
-      query($bid:[ID!], $cursor:String, $cols:[String!]){
+      query($bid:[ID!], $cursor:String, $cols:[String!], $rules:[ItemsQueryRule!]){
         boards(ids:$bid){
-          items_page(limit:500, cursor:$cursor){
+          items_page_by_column_values(limit:500, cursor:$cursor, rules:$rules){
             cursor
             items{
               id state created_at
@@ -477,8 +499,11 @@ function SITE_mondayLeadCallsCountsByMonth_(boardId, colSource, colType, colStat
         }
       }`;
     const colIds = [sourceId, typeId].concat(statusId ? [statusId] : []).concat(dateId ? [dateId] : []);
-    const d = Utils_mondayGraphQL(q, { bid: [Number(boardId)], cursor, cols: colIds });
-    const page = d && d.boards && d.boards[0] && d.boards[0].items_page; if (!page) break;
+    // ✅ OPTIMISATION: Rate limiting Monday
+    const d = RateLimiter.throttle('monday', () =>
+      Utils_mondayGraphQL(q, { bid: [Number(boardId)], cursor, cols: colIds, rules })
+    );
+    const page = d && d.boards && d.boards[0] && d.boards[0].items_page_by_column_values; if (!page) break;
 
     (page.items || []).forEach(it => {
       if (String(it.state || '').toLowerCase() === 'archived') return;
@@ -525,10 +550,32 @@ function SITE_mondayLeadFormsCountsByMonth_(boardId, colSource, colType, colStat
   let cursor = null;
 
   do {
+    // ✅ OPTIMISATION MAJEURE: Filtres Monday pour ne récupérer QUE les items pertinents
+    const rules = [
+      {
+        column_id: sourceId,
+        compare_value: SITE_MONDAY_LEADS_SOURCE_MATCH,
+        operator: 'any_of'
+      },
+      {
+        column_id: typeId,
+        compare_value: SITE_MONDAY_LEADS_FORM_MATCH,
+        operator: 'any_of'
+      }
+    ];
+
+    if (statusId) {
+      rules.push({
+        column_id: statusId,
+        compare_value: SITE_MONDAY_LEADS_STATUS_MATCH,
+        operator: 'any_of'
+      });
+    }
+
     const q = `
-      query($bid:[ID!], $cursor:String, $cols:[String!]){
+      query($bid:[ID!], $cursor:String, $cols:[String!], $rules:[ItemsQueryRule!]){
         boards(ids:$bid){
-          items_page(limit:500, cursor:$cursor){
+          items_page_by_column_values(limit:500, cursor:$cursor, rules:$rules){
             cursor
             items{
               id state created_at
@@ -538,8 +585,11 @@ function SITE_mondayLeadFormsCountsByMonth_(boardId, colSource, colType, colStat
         }
       }`;
     const colIds = [sourceId, typeId].concat(statusId ? [statusId] : []).concat(dateId ? [dateId] : []);
-    const d = Utils_mondayGraphQL(q, { bid: [Number(boardId)], cursor, cols: colIds });
-    const page = d && d.boards && d.boards[0] && d.boards[0].items_page; if (!page) break;
+    // ✅ OPTIMISATION: Rate limiting Monday
+    const d = RateLimiter.throttle('monday', () =>
+      Utils_mondayGraphQL(q, { bid: [Number(boardId)], cursor, cols: colIds, rules })
+    );
+    const page = d && d.boards && d.boards[0] && d.boards[0].items_page_by_column_values; if (!page) break;
 
     (page.items || []).forEach(it => {
       if (String(it.state || '').toLowerCase() === 'archived') return;
