@@ -13,8 +13,8 @@ const META_HEADERS_ROW = 3;   // ligne des entêtes
 const META_START_ROW = 6;   // première ligne de données
 
 /****************************** CONFIG META MARKETING API *******************/
-// ID de compte publicitaire (numérique, sans "act_")
-const META_AD_ACCOUNT_ID = '152460256751291';
+// ✅ ID de compte publicitaire maintenant récupéré depuis Script Properties via Config.js
+// (Plus de hardcoding de constantes sensibles)
 
 // Token long-lived avec accès à l’API Marketing (scope ads_read)
 function META_getMetaToken_() {
@@ -37,7 +37,7 @@ const META_MAG_CHANNELS = [
   'instagram', 'instagram ads',
   'meta', 'meta ads', 'social', 'social paid'
 ];
-const META_MAG_MATCH = 'includes'; // 'equals' | 'includes' | 'regex'
+const META_MAG_MATCH = 'equals'; // 'equals' | 'includes' | 'regex'
 const META_MAG_ANSWERED_ONLY = false; // true => compte uniquement décroches (>0s)
 
 /****************************** CONFIG PAPERFORM (formulaires) *************/
@@ -186,6 +186,8 @@ function META_monthRangeKeys_(fromLocal, toLocal) {
 /******************************** META INSIGHTS ********************************/
 // Retourne { 'YYYY-MM': { spend, impressions, clicks, interactions } }
 function META_fetchInsightsMonthly_(fromDate, toDate) {
+  const META_AD_ACCOUNT_ID = getMetaAdAccountId(); // ✅ Via Config.js
+
   if (!META_AD_ACCOUNT_ID || !/^\d+$/.test(META_AD_ACCOUNT_ID)) {
     throw new Error("META_AD_ACCOUNT_ID invalide (mets l'ID numérique sans 'act_').");
   }

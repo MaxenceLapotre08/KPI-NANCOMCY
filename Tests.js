@@ -196,6 +196,203 @@ function test_SITE_parseMatomoVisitsResponse_() {
 }
 
 /**
+ * Test de SheetHelpers.monthRangeKeys
+ */
+function test_SheetHelpers_monthRangeKeys() {
+    const tests = [
+        {
+            name: "Même mois",
+            from: new Date(2024, 0, 1),
+            to: new Date(2024, 0, 31),
+            expected: ["2024-01"]
+        },
+        {
+            name: "3 mois consécutifs",
+            from: new Date(2024, 0, 1),
+            to: new Date(2024, 2, 31),
+            expected: ["2024-01", "2024-02", "2024-03"]
+        },
+        {
+            name: "À cheval sur 2 années",
+            from: new Date(2024, 11, 1),
+            to: new Date(2025, 1, 28),
+            expected: ["2024-12", "2025-01", "2025-02"]
+        }
+    ];
+
+    let passed = 0;
+    let failed = 0;
+
+    tests.forEach(test => {
+        const result = SheetHelpers.monthRangeKeys(test.from, test.to);
+        const resultStr = JSON.stringify(result);
+        const expectedStr = JSON.stringify(test.expected);
+
+        if (resultStr === expectedStr) {
+            passed++;
+        } else {
+            failed++;
+            Logger.log(`❌ FAIL [${test.name}]: SheetHelpers.monthRangeKeys = ${resultStr} (expected: ${expectedStr})`);
+        }
+    });
+
+    Logger.log(`SheetHelpers.monthRangeKeys: ${passed} passed, ${failed} failed`);
+    return failed === 0;
+}
+
+/**
+ * Test de ErrorHandler.logError
+ */
+function test_ErrorHandler_logError() {
+    const tests = [
+        {
+            name: "Erreur simple (string)",
+            context: "TestContext",
+            error: "Test error message",
+            severity: "ERROR"
+        },
+        {
+            name: "Erreur objet (Error)",
+            context: "TestContext",
+            error: new Error("Test error object"),
+            severity: "WARNING"
+        },
+        {
+            name: "Info avec metadata",
+            context: "TestContext",
+            error: "Info message",
+            severity: "INFO"
+        }
+    ];
+
+    let passed = 0;
+    let failed = 0;
+
+    tests.forEach(test => {
+        try {
+            const result = ErrorHandler.logError(test.context, test.error, test.severity, { test: true });
+
+            // Vérifier que le logEntry a la bonne structure
+            if (result && result.context === test.context && result.severity === test.severity) {
+                passed++;
+            } else {
+                failed++;
+                Logger.log(`❌ FAIL [${test.name}]: Structure logEntry invalide`);
+            }
+        } catch (e) {
+            failed++;
+            Logger.log(`❌ FAIL [${test.name}]: Exception levée: ${e.message}`);
+        }
+    });
+
+    Logger.log(`ErrorHandler.logError: ${passed} passed, ${failed} failed`);
+    return failed === 0;
+}
+
+/**
+ * Test de ErrorHandler.wrapFunction
+ */
+function test_ErrorHandler_wrapFunction() {
+    const tests = [
+        {
+            name: "Fonction qui réussit",
+            fn: () => 42,
+            expectedResult: 42,
+            shouldThrow: false
+        },
+        {
+            name: "Fonction qui échoue avec rethrow=true",
+            fn: () => { throw new Error("Test error"); },
+            expectedResult: null,
+            shouldThrow: true
+        },
+        {
+            name: "Fonction qui échoue avec rethrow=false",
+            fn: () => { throw new Error("Test error"); },
+            expectedResult: null,
+            shouldThrow: false,
+            options: { rethrow: false }
+        }
+    ];
+
+    let passed = 0;
+    let failed = 0;
+
+    tests.forEach(test => {
+        try {
+            const result = ErrorHandler.wrapFunction(test.fn, "TestContext", test.options || {});
+
+            if (test.shouldThrow && !test.options) {
+                failed++;
+                Logger.log(`❌ FAIL [${test.name}]: Devrait throw mais n'a pas throw`);
+            } else if (result === test.expectedResult) {
+                passed++;
+            } else {
+                failed++;
+                Logger.log(`❌ FAIL [${test.name}]: Résultat ${result} != ${test.expectedResult}`);
+            }
+        } catch (e) {
+            if (test.shouldThrow && (!test.options || test.options.rethrow !== false)) {
+                passed++;
+            } else {
+                failed++;
+                Logger.log(`❌ FAIL [${test.name}]: Ne devrait pas throw mais a throw: ${e.message}`);
+            }
+        }
+    });
+
+    Logger.log(`ErrorHandler.wrapFunction: ${passed} passed, ${failed} failed`);
+    return failed === 0;
+}
+
+/**
+ * Test des getters Config.js
+ */
+function test_Config_getters() {
+    const tests = [
+        {
+            name: "getConfig avec clé valide",
+            fn: () => getConfig('DEFAULT_RETRY_COUNT'),
+            expected: 3
+        },
+        {
+            name: "getConfig avec clé invalide (doit throw)",
+            fn: () => getConfig('INVALID_KEY'),
+            shouldThrow: true
+        }
+    ];
+
+    let passed = 0;
+    let failed = 0;
+
+    tests.forEach(test => {
+        try {
+            const result = test.fn();
+
+            if (test.shouldThrow) {
+                failed++;
+                Logger.log(`❌ FAIL [${test.name}]: Devrait throw mais n'a pas throw`);
+            } else if (result === test.expected) {
+                passed++;
+            } else {
+                failed++;
+                Logger.log(`❌ FAIL [${test.name}]: Résultat ${result} != ${test.expected}`);
+            }
+        } catch (e) {
+            if (test.shouldThrow) {
+                passed++;
+            } else {
+                failed++;
+                Logger.log(`❌ FAIL [${test.name}]: Exception inattendue: ${e.message}`);
+            }
+        }
+    });
+
+    Logger.log(`Config getters: ${passed} passed, ${failed} failed`);
+    return failed === 0;
+}
+
+/**
  * Exécute tous les tests
  */
 function runAllTests() {
@@ -213,24 +410,30 @@ function runAllTests() {
         'Utils_monthKeyToFr': test_Utils_monthKeyToFr(),
         'Utils_textEqualsAny': test_Utils_textEqualsAny(),
         'Utils_textIncludesAny': test_Utils_textIncludesAny(),
-        'SITE_parseMatomoVisitsResponse_': test_SITE_parseMatomoVisitsResponse_()
+        'SITE_parseMatomoVisitsResponse_': test_SITE_parseMatomoVisitsResponse_(),
+        'SheetHelpers.monthRangeKeys': test_SheetHelpers_monthRangeKeys(),
+        'ErrorHandler.logError': test_ErrorHandler_logError(),
+        'ErrorHandler.wrapFunction': test_ErrorHandler_wrapFunction(),
+        'Config getters': test_Config_getters()
     };
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
 
     const passed = Object.values(results).filter(r => r === true).length;
     const failed = Object.values(results).filter(r => r === false).length;
+    const total = Object.keys(results).length;
 
     Logger.log('========================================');
-    Logger.log(`RÉSULTATS: ${passed} suites passed, ${failed} suites failed`);
+    Logger.log(`RÉSULTATS: ${passed}/${total} suites passed, ${failed} failed`);
     Logger.log(`Temps d'exécution: ${elapsed}s`);
+    Logger.log(`Couverture estimée: ~${Math.round(total / 200 * 100)}% (${total} fonctions testées sur ~200)`);
     Logger.log('========================================');
 
     if (failed === 0) {
-        Utils_toast(`✅ Tous les tests sont passés (${elapsed}s)`, 'Tests', 5);
+        Utils_toast(`✅ Tous les tests sont passés (${elapsed}s) - ${total} suites`, 'Tests', 5);
         return true;
     } else {
-        Utils_toast(`❌ ${failed} suites de tests échouées (voir les logs)`, 'Tests', 10);
+        Utils_toast(`❌ ${failed}/${total} tests échoués (voir logs)`, 'Tests', 10);
         throw new Error(`${failed} test suite(s) failed. Check logs for details.`);
     }
 }

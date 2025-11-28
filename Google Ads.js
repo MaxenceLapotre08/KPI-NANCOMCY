@@ -161,11 +161,10 @@ function getProp_(key) {
 
 const SHEET_NAME_ADS = 'Google Ads';
 const START_ROW_ADS = 6;
+const HEADERS_ROW_ADS = 3;
 
-// ⚠️ Sans tirets
-const CUSTOMER_ID = '3794858751';
-const DEVELOPER_TOKEN = 'FRKxkVUQzqZSenRB3MC6EA';
-const LOGIN_CUSTOMER_ID = '7343744510';
+// ✅ IDs maintenant récupérés depuis Script Properties via Config.js
+// (Plus de hardcoding de constantes sensibles)
 
 // Historique Google Ads (en mois)
 const GADS_MONTHS_BACK = 24;
@@ -191,6 +190,10 @@ function getGoogleAdsAccessToken_() {
 
 // DATA
 function fetchGoogleAdsMonthly(startDate, endDate) {
+  const CUSTOMER_ID = getGoogleAdsCustomerId(); // ✅ Via Config.js
+  const DEVELOPER_TOKEN = getGoogleAdsDeveloperToken(); // ✅ Via Config.js
+  const LOGIN_CUSTOMER_ID = getGoogleAdsLoginCustomerId(); // ✅ Via Config.js (optionnel)
+
   // API v21 (sept 2025)
   const url = `https://googleads.googleapis.com/v21/customers/${CUSTOMER_ID}/googleAds:searchStream`;
 
@@ -261,75 +264,10 @@ function Utils_monthKeyToFr(ym) {
   return `${FR[m]} ${y}`;
 }
 
-// Style pour une ligne "année"
-function _adsStyleYearRow_(sh, row, moisCol) {
-  sh.getRange(row, 1, 1, sh.getLastColumn()).setBackground('#e6e1f5');
-  sh.getRange(row, moisCol).setFontWeight('bold');
-}
-
-// Trouve la ligne existante d’un mois "YYYY-MM" (sans insertion)
-function _adsFindExistingMonthRow_(sh, moisCol, targetYM) {
-  const last = sh.getLastRow();
-  if (last < START_ROW_ADS) return 0;
-  for (let r = START_ROW_ADS; r <= last; r++) {
-    const v = sh.getRange(r, moisCol).getValue();
-    if (Utils_isYearSeparatorRow(v)) continue;
-    const ym = Utils_sheetCellToYYYYMM(v);
-    if (ym === targetYM) return r;
-  }
-  return 0;
-}
-
-/**
- * Garantit qu’une ligne existe pour le mois targetYM
- * - Crée la ligne année si nécessaire (2024, 2025…)
- * - Ajoute le mois à la bonne place dans l’année
- * - Ne touche pas aux autres colonnes (les formules restent)
- */
-function _adsFindOrInsertMonthRow_(sh, moisCol, targetYM) {
-  const lastRow = sh.getLastRow();
-
-  // 1. Chercher si la ligne du mois existe déjà
-  for (let r = START_ROW_ADS; r <= lastRow; r++) {
-    const v = sh.getRange(r, moisCol).getValue();
-    if (Utils_isYearSeparatorRow(v)) continue;
-    const ym = Utils_sheetCellToYYYYMM(v);
-    if (ym === targetYM) {
-      Logger.log(`[Ads/INFO] Ligne pour ${targetYM} trouvée en ${r}. Utilisation de la ligne existante.`);
-      return r;
-    }
-  }
-
-  // 2. Si elle n'existe pas, trouver la dernière ligne de données en se basant sur la colonne Mois
-  let lastDataRow = START_ROW_ADS - 1;
-  for (let r = lastRow; r >= START_ROW_ADS; r--) {
-    const v = sh.getRange(r, moisCol).getValue();
-    if (v !== '') {
-      lastDataRow = r;
-      break;
-    }
-  }
-
-  const targetRow = lastDataRow + 1;
-  const lastDataValue = lastDataRow >= START_ROW_ADS ? sh.getRange(lastDataRow, moisCol).getValue() : '';
-  const lastDataYM = Utils_sheetCellToYYYYMM(lastDataValue) || '1999-12';
-
-  // 3. Gérer le cas particulier du changement d'année
-  const lastYear = parseInt(lastDataYM.slice(0, 4), 10);
-  const targetYear = parseInt(targetYM.slice(0, 4), 10);
-
-  if (targetYear > lastYear) {
-    Logger.log(`[Ads/INFO] Changement d'année détecté (${lastYear} -> ${targetYear}). Ajout d'un séparateur.`);
-    sh.getRange(targetRow, moisCol).setValue(String(targetYear));
-    _adsStyleYearRow_(sh, targetRow, moisCol);
-    Logger.log(`[Ads/WRITE] Écriture des KPIs pour ${targetYM} sur la nouvelle ligne ${targetRow + 1}`);
-    return targetRow + 1;
-  }
-
-  // 4. Cas normal : on écrit sur la ligne juste après la dernière
-  Logger.log(`[Ads/WRITE] Écriture des KPIs pour ${targetYM} sur la nouvelle ligne ${targetRow}`);
-  return targetRow;
-}
+// ✅ Fonctions maintenant dans SheetHelpers.js (élimine duplication)
+// _adsStyleYearRow_ -> SheetHelpers.styleYearRow
+// _adsFindExistingMonthRow_ -> SheetHelpers.findExistingMonthRow
+// _adsFindOrInsertMonthRow_ -> SheetHelpers.ensureMonthRow
 
 // ÉCRITURE (in-place, cellule par cellule pour préserver les formules)
 function writeAdsMonthlyToSheetFlexible(data) {
@@ -352,7 +290,7 @@ function writeAdsMonthlyToSheetFlexible(data) {
   let wrote = 0;
   for (const k of monthKeys) {
     const v = byMonth[k];
-    const row = _adsFindOrInsertMonthRow_(sh, moisCol, k);
+    const row = SheetHelpers.ensureMonthRow(sh, moisCol, k, START_ROW_ADS, 'Ads');
 
     Utils_setPreserveFormula(sh, row, moisCol, Utils_monthKeyToFr(k));
 
@@ -412,7 +350,7 @@ function run_GAds_AddLastMonth() {
   const v = byMonth[ymKey];
   if (!v) { Logger.log('[GAds AddLastMonth] Aucune donnée renvoyée pour ' + ymKey); return; }
 
-  const row = _adsFindOrInsertMonthRow_(sh, moisCol, ymKey);
+  const row = SheetHelpers.ensureMonthRow(sh, moisCol, ymKey, START_ROW_ADS, 'Ads');
 
   const moisCell = sh.getRange(row, moisCol);
   if (!moisCell.getFormula()) {

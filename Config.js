@@ -44,7 +44,11 @@ const CONFIG = {
     SHEET_NAME_SITE: 'Site Internet',
     SHEET_NAME_ADS: 'Google Ads',
     SHEET_NAME_META: 'Meta Ads',
-    SHEET_NAME_GMB: 'GMB'
+    SHEET_NAME_GMB: 'GMB',
+
+    // ========== Google Ads IDs (depuis Script Properties) ==========
+    // Ces valeurs sont récupérées dynamiquement via getters ci-dessous
+    // pour éviter de les hardcoder dans le code
 };
 
 /**
@@ -57,4 +61,52 @@ function getConfig(key) {
         return CONFIG[key];
     }
     throw new Error(`Configuration key '${key}' not found in CONFIG`);
+}
+
+/**
+ * Récupère le Customer ID de Google Ads depuis les Script Properties.
+ * @returns {string} Customer ID (sans tirets)
+ * @throws {Error} Si la propriété n'est pas définie
+ */
+function getGoogleAdsCustomerId() {
+    const prop = PropertiesService.getScriptProperties().getProperty('GOOGLE_ADS_CUSTOMER_ID');
+    if (!prop) {
+        throw new Error('GOOGLE_ADS_CUSTOMER_ID not found in Script Properties. Please configure it in Project Settings > Script Properties.');
+    }
+    return prop;
+}
+
+/**
+ * Récupère le Developer Token de Google Ads depuis les Script Properties.
+ * @returns {string} Developer Token
+ * @throws {Error} Si la propriété n'est pas définie
+ */
+function getGoogleAdsDeveloperToken() {
+    const prop = PropertiesService.getScriptProperties().getProperty('GOOGLE_ADS_DEVELOPER_TOKEN');
+    if (!prop) {
+        throw new Error('GOOGLE_ADS_DEVELOPER_TOKEN not found in Script Properties. Please configure it in Project Settings > Script Properties.');
+    }
+    return prop;
+}
+
+/**
+ * Récupère le Login Customer ID de Google Ads depuis les Script Properties.
+ * Optionnel pour la plupart des comptes.
+ * @returns {string|null} Login Customer ID ou null si non configuré
+ */
+function getGoogleAdsLoginCustomerId() {
+    return PropertiesService.getScriptProperties().getProperty('GOOGLE_ADS_LOGIN_CUSTOMER_ID') || null;
+}
+
+/**
+ * Récupère l'ID du compte publicitaire Meta depuis les Script Properties.
+ * @returns {string} Account ID (numérique, sans "act_")
+ * @throws {Error} Si la propriété n'est pas définie
+ */
+function getMetaAdAccountId() {
+    const prop = PropertiesService.getScriptProperties().getProperty('META_AD_ACCOUNT_ID');
+    if (!prop) {
+        throw new Error('META_AD_ACCOUNT_ID not found in Script Properties. Please configure it in Project Settings > Script Properties.');
+    }
+    return prop;
 }

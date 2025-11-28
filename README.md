@@ -25,6 +25,69 @@
 8. **Paperform** - Soumissions de formulaires
 9. **Monday.com** - Leads et formulaires
 
+### Flux de Données
+
+```mermaid
+graph LR
+    %% Sources de données
+    GA4[Google Analytics 4]
+    Matomo[Matomo]
+    GSC[Google Search Console]
+    GAds[Google Ads API]
+    Meta[Meta Marketing API]
+    GMB[Google Business Profile]
+    Magnetis[Magnetis]
+    Paperform[Paperform]
+    Monday[Monday.com]
+    
+    %% Modules de collecte
+    GA4 --> SiteJS[Site Internet.js]
+    Matomo --> SiteJS
+    GSC --> SiteJS
+    
+    GAds --> AdsJS[Google Ads.js]
+    Magnetis --> AdsJS
+    Paperform --> AdsJS
+    Monday --> AdsJS
+    
+    Meta --> MetaJS[Meta Ads.js]
+    Magnetis --> MetaJS
+    Paperform --> MetaJS
+    Monday --> MetaJS
+    
+    GMB --> GMBJS[GMB.js]
+    
+    %% Helpers et utilitaires
+    SiteJS --> Utils[Utils.js]
+    AdsJS --> Utils
+    MetaJS --> Utils
+    GMBJS --> Utils
+    
+    SiteJS --> SheetHelpers[SheetHelpers.js]
+    AdsJS --> SheetHelpers
+    MetaJS --> SheetHelpers
+    GMBJS --> SheetHelpers
+    
+    Utils --> Config[Config.js]
+    
+    %% Destination
+    SiteJS --> Sheet1[📊 Site Internet]
+    AdsJS --> Sheet2[📊 Google Ads]
+    MetaJS --> Sheet3[📊 Meta Ads]
+    GMBJS --> Sheet4[📊 GMB]
+    
+    %% Styling
+    classDef apiClass fill:#e1f5ff,stroke:#0288d1,stroke-width:2px
+    classDef moduleClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef helperClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef sheetClass fill:#e8f5e9,stroke:#388e3c,stroke-width:3px
+    
+    class GA4,Matomo,GSC,GAds,Meta,GMB,Magnetis,Paperform,Monday apiClass
+    class SiteJS,AdsJS,MetaJS,GMBJS moduleClass
+    class Utils,SheetHelpers,Config helperClass
+    class Sheet1,Sheet2,Sheet3,Sheet4 sheetClass
+```
+
 ## ⚙️ Configuration
 
 ### Propriétés de Script Requises
