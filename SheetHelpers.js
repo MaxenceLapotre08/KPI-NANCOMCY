@@ -12,7 +12,7 @@ const SheetHelpers = {
      * @param {number} moisCol - Colonne du mois (1-indexed)
      */
     styleYearRow(sheet, row, moisCol) {
-        sheet.getRange(row, 1, 1, sheet.getLastColumn()).setBackground('#e6e1f5');
+        sheet.getRange(row, 1, 1, sheet.getLastColumn()).setBackground('#d6d6d6ff');
         sheet.getRange(row, moisCol).setFontWeight('bold');
     },
 

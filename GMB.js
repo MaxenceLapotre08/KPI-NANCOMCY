@@ -16,17 +16,17 @@ const METRICS = {
   'BUSINESS_DIRECTION_REQUESTS': 'Demande d\'itinéraire'
 };
 
-/**************************** HELPERS GÉNÉRAUX (Utilise Utils.js) ****************************/
+// ************************** HELPERS GÉNÉRAUX (Utilise Utils.js) ****************************/
 // Les fonctions suivantes sont maintenant dans Utils.js :
 // Utils_normHeader -> Utils_normHeader
 // Utils_findColByHeaderAliases -> Utils_findColByHeaderAliases
 // Utils_isYearSeparatorRow -> Utils_isYearSeparatorRow
 // Utils_sheetCellToYYYYMM -> Utils_sheetCellToYYYYMM
 // Utils_executeWithRetry -> Utils_executeWithRetry
-function _gbmStyleYearRow_(sh, row, moisCol) {
-  sh.getRange(row, 1, 1, sh.getLastColumn()).setBackground('#e6e1f5');
-  sh.getRange(row, moisCol).setFontWeight('bold');
-}
+
+// ✅ Fonction maintenant dans SheetHelpers.js
+// _gbmStyleYearRow_ -> SheetHelpers.styleYearRow
+
 
 // VRAI si la colonne est listée comme ayant une formule dans Sheet_Structures.md
 function GMB_isProtectedHeader_(sh, col) {
@@ -119,6 +119,7 @@ function aggregateByMonth_(responseJson) {
   });
   return out;
 }
+
 
 /* ---------- Reviews (My Business v4) ---------- */
 
@@ -233,63 +234,9 @@ function fetchReviewsMonthly_(startDate, endDate) {
   return out;
 }
 
-/* ---------- Placement intelligent (lignes “année” + mois) ---------- */
-function _gbmFindOrInsertMonthRow_(sh, moisCol, targetYM) {
-  const targetYear = parseInt(targetYM.slice(0, 4), 10);
-  const lastRow = Math.max(sh.getLastRow(), START_ROW - 1);
 
-  if (lastRow < START_ROW) {
-    sh.insertRowsBefore(START_ROW, 2);
-    sh.getRange(START_ROW, moisCol).setValue(String(targetYear));
-    _gbmStyleYearRow_(sh, START_ROW, moisCol);
-    return START_ROW + 1;
-  }
-
-  let yearRowForTarget = null;
-  let nextYearRowAfterTarget = null;
-  let existingMonthRow = null;
-
-  for (let r = START_ROW; r <= sh.getLastRow(); r++) {
-    const v = sh.getRange(r, moisCol).getValue();
-    if (Utils_isYearSeparatorRow(v)) {
-      const y = parseInt(String(v).trim(), 10);
-      if (yearRowForTarget === null && y === targetYear) yearRowForTarget = r;
-      if (nextYearRowAfterTarget === null && y > targetYear && yearRowForTarget !== null) {
-        nextYearRowAfterTarget = r; break;
-      }
-      continue;
-    }
-    const ym = Utils_sheetCellToYYYYMM(v);
-    if (ym === targetYM) { existingMonthRow = r; break; }
-  }
-  if (existingMonthRow) return existingMonthRow;
-
-  if (yearRowForTarget !== null) {
-    const blockStart = yearRowForTarget + 1;
-    const blockEnd = (nextYearRowAfterTarget ? nextYearRowAfterTarget : (sh.getLastRow() + 1)) - 1;
-    for (let r = blockStart; r <= blockEnd; r++) {
-      const ym = Utils_sheetCellToYYYYMM(sh.getRange(r, moisCol).getValue());
-      if (ym && ym > targetYM) { sh.insertRowsBefore(r, 1); return r; }
-    }
-    const insertAt = blockEnd + 1;
-    sh.insertRowsBefore(insertAt, 1);
-    return insertAt;
-  }
-
-  let firstGreaterYearRow = null;
-  for (let r = START_ROW; r <= sh.getLastRow(); r++) {
-    const v = sh.getRange(r, moisCol).getValue();
-    if (Utils_isYearSeparatorRow(v)) {
-      const y = parseInt(String(v).trim(), 10);
-      if (y > targetYear) { firstGreaterYearRow = r; break; }
-    }
-  }
-  const yearRow = firstGreaterYearRow ? firstGreaterYearRow : (sh.getLastRow() + 1);
-  sh.insertRowsBefore(yearRow, 2);
-  sh.getRange(yearRow, moisCol).setValue(String(targetYear));
-  _gbmStyleYearRow_(sh, yearRow, moisCol);
-  return yearRow + 1;
-}
+// ✅ Fonction maintenant dans SheetHelpers.js (56 lignes supprimées)
+// _gbmFindOrInsertMonthRow_ -> SheetHelpers.ensureMonthRow
 
 /* ---------- Écriture d’une ligne mois (détection par entêtes) ---------- */
 function writeGBMRowAt_(sh, rowIndex, monthKey, metrics, reviewsAgg) {

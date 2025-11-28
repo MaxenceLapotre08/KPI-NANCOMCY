@@ -35,14 +35,14 @@ const SITE_MONDAY_LEADS_COL_SOURCE = 'Source du Lead';
 const SITE_MONDAY_LEADS_COL_TYPE = 'FORMULAIRE / APPELS';
 // ★ nouvelle colonne pour le statut “Lead”
 const SITE_MONDAY_LEADS_COL_STATUS = 'Nature du contact'; // ← mets le libellé exact de ta colonne statut
-const SITE_MONDAY_LEADS_COL_DATE = 'Date d\'entrée'; // colonne Date à utiliser si dispo
+const SITE_MONDAY_LEADS_COL_DATE = '🗓️ Date de création'; // ✅ CORRIGÉ: utilise la date de création
 // correspondances (insensibles casse/accents)
-const SITE_MONDAY_LEADS_SOURCE_MATCH = ['site internet', 'site-internet', 'site', 'SITE INTERNET'];
-const SITE_MONDAY_LEADS_TYPE_MATCH = ['appel', 'call', 'téléphone', 'Appel'];
+const SITE_MONDAY_LEADS_SOURCE_MATCH = ['SITE INTERNET']; // ✅ Valeur exacte dans Monday
+const SITE_MONDAY_LEADS_TYPE_MATCH = ['Appel'];
 // ★ correspondances pour FORMULAIRE
-const SITE_MONDAY_LEADS_FORM_MATCH = ['formulaire', 'form', 'paperform', 'Formulaire'];
+const SITE_MONDAY_LEADS_FORM_MATCH = ['Formulaire'];
 // ★ correspondances pour le statut Lead
-const SITE_MONDAY_LEADS_STATUS_MATCH = ['lead', 'prospect', 'Lead'];
+const SITE_MONDAY_LEADS_STATUS_MATCH = ['Lead'];
 
 /****************************** HELPERS COMMUNS *****************************/
 /****************************** HELPERS COMMUNS (Utilise Utils.js) *****************************/
@@ -57,59 +57,11 @@ const SITE_MONDAY_LEADS_STATUS_MATCH = ['lead', 'prospect', 'Lead'];
 // Utils_setSecondsAsDuration -> Utils_setSecondsAsDuration
 // SITE_normalizeDomain_ -> Utils_normalizeDomain
 
-/************ Insertion ligne “année” et mois ************/
-function SITE__styleYearRow_(sh, row, moisCol) {
-  sh.getRange(row, 1, 1, sh.getLastColumn()).setBackground('#e6e1f5');
-  sh.getRange(row, moisCol).setFontWeight('bold');
-}
 
-function SITE__findOrInsertMonthRow_(sh, moisCol, targetYM) {
-  const lastRow = sh.getLastRow();
+// ✅ Fonctions maintenant dans SheetHelpers.js (élimine 52 lignes de duplication)
+// SITE__styleYearRow_ -> SheetHelpers.styleYearRow
+// SITE__findOrInsertMonthRow_ -> SheetHelpers.ensureMonthRow
 
-  // 1. Chercher si la ligne du mois existe déjà
-  for (let r = START_ROW_SITE; r <= lastRow; r++) {
-    const v = sh.getRange(r, moisCol).getValue();
-    if (Utils_isYearSeparatorRow(v)) continue;
-    const ym = Utils_sheetCellToYYYYMM(v);
-    if (ym === targetYM) {
-      Logger.log(`[INFO] Ligne pour ${targetYM} trouvée en ${r}. Utilisation de la ligne existante.`);
-      return r; // La ligne existe, on la retourne sans rien toucher.
-    }
-  }
-
-  // 2. Si elle n'existe pas, trouver la dernière ligne de données en se basant sur la colonne Mois
-  let lastDataRow = START_ROW_SITE - 1;
-  for (let r = lastRow; r >= START_ROW_SITE; r--) {
-    const v = sh.getRange(r, moisCol).getValue();
-    // La dernière ligne de donnée est la première non-vide en partant du bas
-    if (v !== '') {
-      lastDataRow = r;
-      break;
-    }
-  }
-
-  const targetRow = lastDataRow + 1;
-  const lastDataValue = lastDataRow >= START_ROW_SITE ? sh.getRange(lastDataRow, moisCol).getValue() : '';
-  const lastDataYM = Utils_sheetCellToYYYYMM(lastDataValue) || '1999-12';
-
-  // 3. Gérer le cas particulier du changement d'année
-  const lastYear = parseInt(lastDataYM.slice(0, 4), 10);
-  const targetYear = parseInt(targetYM.slice(0, 4), 10);
-
-  if (targetYear > lastYear) {
-    Logger.log(`[INFO] Changement d'année détecté (${lastYear} -> ${targetYear}). Ajout d'un séparateur.`);
-    // On écrit la nouvelle année sur la ligne cible
-    sh.getRange(targetRow, moisCol).setValue(String(targetYear));
-    SITE__styleYearRow_(sh, targetRow, moisCol);
-    // La ligne pour les KPIs sera celle d'en dessous
-    Logger.log(`[WRITE] Écriture des KPIs pour ${targetYM} sur la nouvelle ligne ${targetRow + 1}`);
-    return targetRow + 1;
-  }
-
-  // 4. Cas normal : on écrit sur la ligne juste après la dernière
-  Logger.log(`[WRITE] Écriture des KPIs pour ${targetYM} sur la nouvelle ligne ${targetRow}`);
-  return targetRow;
-}
 
 /******************************** GA4 ***************************************/
 function ga4FetchMonthly_(property, startDate, endDate) {
@@ -700,7 +652,7 @@ function SITE_findCols_(sh) {
 
 
 function SITE_writeMonthRow_(sh, cols, ymKey, values) {
-  const row = SITE__findOrInsertMonthRow_(sh, cols.mois, ymKey);
+  const row = SheetHelpers.ensureMonthRow(sh, cols.mois, ymKey, START_ROW_SITE, 'Site');
 
   // 1. Préparer toutes les valeurs à écrire dans un "plan d'écriture"
   const writePlan = {};
@@ -743,85 +695,95 @@ function SITE_writeMonthRow_(sh, cols, ymKey, values) {
 const SITE_MONTHS_BACK = 21;
 
 function run_Site_FullHistory() {
-  const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME_SITE);
-  if (!sh) throw new Error(`Onglet '${SHEET_NAME_SITE}' introuvable`);
-  const cols = SITE_findCols_(sh);
-  if (!cols.mois) throw new Error("Colonne 'Mois' introuvable (ligne d’entêtes).");
+  PerformanceLogger.start('Site_FullHistory');
 
-  const today = new Date();
-  const start = new Date(today.getFullYear(), today.getMonth() - SITE_MONTHS_BACK, 1);
-  const end = new Date(today.getFullYear(), today.getMonth(), 0);
-  const startStr = Utilities.formatDate(start, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  const endStr = Utilities.formatDate(end, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  const matomoCutoffDate = new Date(2025, 10, 1); // 1er Novembre 2025
+  return ErrorHandler.wrapFunction(() => {
+    const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME_SITE);
+    Validators.validateSheetExists(SpreadsheetApp.getActive(), SHEET_NAME_SITE, 'run_Site_FullHistory');
 
-  Utils_toast('Site: collecte…', 'Site Internet', 4);
+    const cols = SITE_findCols_(sh);
+    if (!cols.mois) throw new Error("Colonne 'Mois' introuvable (ligne d'entêtes).");
 
-  const ga = Utils_executeWithRetry(() => ga4FetchMonthly_(GA4_PROPERTY, startStr, endStr), 'GA4 monthly');
-  const gsc = Utils_executeWithRetry(() => gscFetchMonthly_(GSC_SITE_URL, startStr, endStr), 'GSC monthly');
-  const callsByMonth = Utils_executeWithRetry(() => SITE_magnetisAggregateMonthlyCounts_(SITE_magnetisFetchCalls_(start, end)), 'Magnetis calls');
-  const formsByMonth = Utils_executeWithRetry(() => SITE_formsCountsByMonth_(new Date(Date.UTC(start.getFullYear(), start.getMonth(), 1)), new Date(Date.UTC(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59))), 'Forms (Paper+Monday)');
+    const today = new Date();
+    const start = new Date(today.getFullYear(), today.getMonth() - SITE_MONTHS_BACK, 1);
+    const end = new Date(today.getFullYear(), today.getMonth(), 0);
 
-  let matomoVisits = {};
-  // On ne lance l'appel Matomo que si la période de fin est après la date de bascule
-  if (end >= matomoCutoffDate) {
-    const matomoStartDate = start > matomoCutoffDate ? start : matomoCutoffDate;
-    const matomoStartStr = Utilities.formatDate(matomoStartDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-    const rawMatomo = Utils_executeWithRetry(
-      () => SITE_matomoFetchVisitsMonthly_(matomoStartStr, endStr), 'Matomo Visits'
+    Validators.validateDateRange(start, end, 'run_Site_FullHistory');
+
+    const startStr = Utilities.formatDate(start, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    const endStr = Utilities.formatDate(end, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    const matomoCutoffDate = new Date(2025, 10, 1); // 1er Novembre 2025
+
+    Utils_toast('Site: collecte…', 'Site Internet', 4);
+
+    const ga = ErrorHandler.executeWithRetry(() => ga4FetchMonthly_(GA4_PROPERTY, startStr, endStr), 'Site - GA4 monthly', 3, 1000);
+    const gsc = Utils_executeWithRetry(() => gscFetchMonthly_(GSC_SITE_URL, startStr, endStr), 'GSC monthly');
+    const callsByMonth = Utils_executeWithRetry(() => SITE_magnetisAggregateMonthlyCounts_(SITE_magnetisFetchCalls_(start, end)), 'Magnetis calls');
+    const formsByMonth = Utils_executeWithRetry(() => SITE_formsCountsByMonth_(new Date(Date.UTC(start.getFullYear(), start.getMonth(), 1)), new Date(Date.UTC(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59))), 'Forms (Paper+Monday)');
+
+    let matomoVisits = {};
+    // On ne lance l'appel Matomo que si la période de fin est après la date de bascule
+    if (end >= matomoCutoffDate) {
+      const matomoStartDate = start > matomoCutoffDate ? start : matomoCutoffDate;
+      const matomoStartStr = Utilities.formatDate(matomoStartDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      const rawMatomo = Utils_executeWithRetry(
+        () => SITE_matomoFetchVisitsMonthly_(matomoStartStr, endStr), 'Matomo Visits'
+      );
+      matomoVisits = SITE_parseMatomoVisitsResponse_(rawMatomo);
+    }
+
+    const leadCallsByMonth = Utils_executeWithRetry(
+      () => SITE_mondayLeadCallsCountsByMonth_(
+        SITE_MONDAY_LEADS_BOARD_ID,
+        SITE_MONDAY_LEADS_COL_SOURCE,
+        SITE_MONDAY_LEADS_COL_TYPE,
+        new Date(Date.UTC(start.getFullYear(), start.getMonth(), 1)),
+        new Date(Date.UTC(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59))
+      ),
+      'Monday lead calls'
     );
-    matomoVisits = SITE_parseMatomoVisitsResponse_(rawMatomo);
-  }
 
-  const leadCallsByMonth = Utils_executeWithRetry(
-    () => SITE_mondayLeadCallsCountsByMonth_(
-      SITE_MONDAY_LEADS_BOARD_ID,
-      SITE_MONDAY_LEADS_COL_SOURCE,
-      SITE_MONDAY_LEADS_COL_TYPE,
-      new Date(Date.UTC(start.getFullYear(), start.getMonth(), 1)),
-      new Date(Date.UTC(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59))
-    ),
-    'Monday lead calls'
-  );
+    const leadFormsByMonth = Utils_executeWithRetry(
+      () => SITE_mondayLeadFormsCountsByMonth_(
+        SITE_MONDAY_LEADS_BOARD_ID,
+        SITE_MONDAY_LEADS_COL_SOURCE,
+        SITE_MONDAY_LEADS_COL_TYPE,
+        SITE_MONDAY_LEADS_COL_STATUS,
+        new Date(Date.UTC(start.getFullYear(), start.getMonth(), 1)),
+        new Date(Date.UTC(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59))
+      ),
+      'Monday lead forms'
+    );
 
-  const leadFormsByMonth = Utils_executeWithRetry(
-    () => SITE_mondayLeadFormsCountsByMonth_(
-      SITE_MONDAY_LEADS_BOARD_ID,
-      SITE_MONDAY_LEADS_COL_SOURCE,
-      SITE_MONDAY_LEADS_COL_TYPE,
-      SITE_MONDAY_LEADS_COL_STATUS,
-      new Date(Date.UTC(start.getFullYear(), start.getMonth(), 1)),
-      new Date(Date.UTC(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59))
-    ),
-    'Monday lead forms'
-  );
-
-  const keys = Array.from(new Set([]
-    .concat(Object.keys(ga), Object.keys(gsc), Object.keys(callsByMonth), Object.keys(formsByMonth),
-      Object.keys(leadCallsByMonth), Object.keys(leadFormsByMonth))
-  )).sort();
+    const keys = Array.from(new Set([]
+      .concat(Object.keys(ga), Object.keys(gsc), Object.keys(callsByMonth), Object.keys(formsByMonth),
+        Object.keys(leadCallsByMonth), Object.keys(leadFormsByMonth))
+    )).sort();
 
 
 
-  keys.forEach(ym => {
-    const monthDate = new Date(parseInt(ym.slice(0, 4)), parseInt(ym.slice(5, 7)) - 1, 1);
-    const useMatomo = monthDate >= matomoCutoffDate;
+    keys.forEach(ym => {
+      const monthDate = new Date(parseInt(ym.slice(0, 4)), parseInt(ym.slice(5, 7)) - 1, 1);
+      const useMatomo = monthDate >= matomoCutoffDate;
 
-    const values = {
-      // Utilise Matomo pour les sessions si la date est >= Nov 2025, sinon GA4
-      sessions: useMatomo ? (matomoVisits[ym]?.sessions ?? null) : (ga[ym]?.sessions ?? null),
-      avgSec: ga[ym]?.avgSec ?? null,
-      impressions: gsc[ym]?.impressions ?? null,
-      calls: callsByMonth[ym] ?? null,
-      forms: formsByMonth[ym] ?? null,
-      leadCalls: leadCallsByMonth[ym] ?? null,
-      leadForms: leadFormsByMonth[ym] ?? null,
-      bounce: ga[ym]?.bouncePct ?? null
-    };
-    SITE_writeMonthRow_(sh, cols, ym, values);
-  });
+      const values = {
+        // Utilise Matomo pour les sessions si la date est >= Nov 2025, sinon GA4
+        sessions: useMatomo ? (matomoVisits[ym]?.sessions ?? null) : (ga[ym]?.sessions ?? null),
+        avgSec: ga[ym]?.avgSec ?? null,
+        impressions: gsc[ym]?.impressions ?? null,
+        calls: callsByMonth[ym] ?? null,
+        forms: formsByMonth[ym] ?? null,
+        leadCalls: leadCallsByMonth[ym] ?? null,
+        leadForms: leadFormsByMonth[ym] ?? null,
+        bounce: ga[ym]?.bouncePct ?? null
+      };
+      SITE_writeMonthRow_(sh, cols, ym, values);
+    });
+
+  }, 'run_Site_FullHistory', { rethrow: true });
 
   Utils_toast('Site: Full history terminé ✅', 'Site Internet', 5);
+  PerformanceLogger.end('Site_FullHistory');
 }
 
 function run_Site_AddLastMonth() {

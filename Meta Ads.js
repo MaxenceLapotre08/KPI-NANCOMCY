@@ -100,75 +100,12 @@ function META_getMatomoToken_() {
 // Utils_monthKeyToFr -> Utils_monthKeyToFr
 // Utils_setSecondsAsDuration -> Utils_setSecondsAsDuration
 
-/************ Lignes présentes / recherche de ligne (SANS insertion) ********/
-function META_findExistingMonthRow_(sh, moisCol, targetYM) {
-  const last = sh.getLastRow();
-  if (last < META_START_ROW) return 0;
-  for (let r = META_START_ROW; r <= last; r++) {
-    const v = sh.getRange(r, moisCol).getValue();
-    if (Utils_isYearSeparatorRow(v)) continue;
-    const ym = Utils_sheetCellToYYYYMM(v);
-    if (ym === targetYM) return r;
-  }
-  return 0;
-}
 
-/************ Insertion propre d’une ligne année + mois *********************/
-function META__styleYearRow_(sh, row, moisCol) {
-  sh.getRange(row, 1, 1, sh.getLastColumn()).setBackground('#e6e1f5');
-  sh.getRange(row, moisCol).setFontWeight('bold');
-}
+// ✅ Fonctions maintenant dans SheetHelpers.js (élimine 69 lignes de duplication)
+// META_findExistingMonthRow_ -> SheetHelpers.findExistingMonthRow
+// META__styleYearRow_ -> SheetHelpers.styleYearRow
+// META_ensureMonthRow_ -> SheetHelpers.ensureMonthRow
 
-/**
- * Garantit qu’une ligne existe pour le mois targetYM
- * - Crée la ligne année si nécessaire (2024, 2025…)
- * - Ajoute le mois à la bonne place dans l’année
- * - Ne touche pas aux autres colonnes (les formules existantes restent)
- */
-function META_ensureMonthRow_(sh, moisCol, targetYM) {
-  const lastRow = sh.getLastRow();
-
-  // 1. Chercher si la ligne du mois existe déjà
-  for (let r = META_START_ROW; r <= lastRow; r++) {
-    const v = sh.getRange(r, moisCol).getValue();
-    if (Utils_isYearSeparatorRow(v)) continue;
-    const ym = Utils_sheetCellToYYYYMM(v);
-    if (ym === targetYM) {
-      Logger.log(`[Meta/INFO] Ligne pour ${targetYM} trouvée en ${r}. Utilisation de la ligne existante.`);
-      return r;
-    }
-  }
-
-  // 2. Si elle n'existe pas, trouver la dernière ligne de données en se basant sur la colonne Mois
-  let lastDataRow = META_START_ROW - 1;
-  for (let r = lastRow; r >= META_START_ROW; r--) {
-    const v = sh.getRange(r, moisCol).getValue();
-    if (v !== '') {
-      lastDataRow = r;
-      break;
-    }
-  }
-
-  const targetRow = lastDataRow + 1;
-  const lastDataValue = lastDataRow >= META_START_ROW ? sh.getRange(lastDataRow, moisCol).getValue() : '';
-  const lastDataYM = Utils_sheetCellToYYYYMM(lastDataValue) || '1999-12';
-
-  // 3. Gérer le cas particulier du changement d'année
-  const lastYear = parseInt(lastDataYM.slice(0, 4), 10);
-  const targetYear = parseInt(targetYM.slice(0, 4), 10);
-
-  if (targetYear > lastYear) {
-    Logger.log(`[Meta/INFO] Changement d'année détecté (${lastYear} -> ${targetYear}). Ajout d'un séparateur.`);
-    sh.getRange(targetRow, moisCol).setValue(String(targetYear));
-    META__styleYearRow_(sh, targetRow, moisCol);
-    Logger.log(`[Meta/WRITE] Écriture des KPIs pour ${targetYM} sur la nouvelle ligne ${targetRow + 1}`);
-    return targetRow + 1;
-  }
-
-  // 4. Cas normal : on écrit sur la ligne juste après la dernière
-  Logger.log(`[Meta/WRITE] Écriture des KPIs pour ${targetYM} sur la nouvelle ligne ${targetRow}`);
-  return targetRow;
-}
 
 /****************************** RANGE DE MOIS (bornage strict) **************/
 function META_monthRangeKeys_(fromLocal, toLocal) {
@@ -705,7 +642,7 @@ function META_findCols_(sh) {
 
 /**************************** ÉCRITURE D’UNE LIGNE **************************/
 function META_writeMonth_(sh, cols, ymKey, v) {
-  const row = META_ensureMonthRow_(sh, cols.mois, ymKey);
+  const row = SheetHelpers.ensureMonthRow(sh, cols.mois, ymKey, META_START_ROW, 'Meta');
 
   // Mois : on n’écrase pas une éventuelle formule
   Utils_setPreserveFormula(sh, row, cols.mois, Utils_monthKeyToFr(ymKey));
