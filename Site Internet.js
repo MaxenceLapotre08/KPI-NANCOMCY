@@ -136,27 +136,36 @@ function SITE_matomoFetchVisitsMonthly_(startDate, endDate) {
 
   Logger.log(`[Matomo Visits] Période: ${dateRange}, Segment ID récupéré: ${segmentId}`);
 
-  const params = {
-    method: 'VisitsSummary.get',
-    period: 'month',
-    date: dateRange,
-    format: 'JSON'
-  };
+  // ✅ OPTIMISATION: Cache pour éviter les appels répétitifs
+  const cacheKey = `matomo_visits_${startDate}_${endDate}_${segmentId || 'noseg'}`;
 
-  if (segmentId) {
-    const def = SITE_matomoGetSegmentDefinition_(segmentId);
-    if (def) {
-      params.segment = def;
-      Logger.log(`[Matomo Visits] Ajout du paramètre segment (résolu): ${params.segment}`);
-    } else {
-      Logger.log(`[Matomo Visits] Impossible de résoudre le segment ID ${segmentId}. Requête sans segment.`);
-    }
-  } else {
-    Logger.log(`[Matomo Visits] Aucun segment appliqué.`);
-  }
+  return CacheManager.cachedFetch(
+    cacheKey,
+    () => {
+      const params = {
+        method: 'VisitsSummary.get',
+        period: 'month',
+        date: dateRange,
+        format: 'JSON'
+      };
 
-  const resp = SITE_matomoFetch_(params);
-  return resp;
+      if (segmentId) {
+        const def = SITE_matomoGetSegmentDefinition_(segmentId);
+        if (def) {
+          params.segment = def;
+          Logger.log(`[Matomo Visits] Ajout du paramètre segment (résolu): ${params.segment}`);
+        } else {
+          Logger.log(`[Matomo Visits] Impossible de résoudre le segment ID ${segmentId}. Requête sans segment.`);
+        }
+      } else {
+        Logger.log(`[Matomo Visits] Aucun segment appliqué.`);
+      }
+
+      // ✅ OPTIMISATION: Rate limiting pour Matomo
+      return RateLimiter.throttle('matomo', () => SITE_matomoFetch_(params));
+    },
+    CacheManager.CACHE_DURATION.MEDIUM // 30min
+  );
 }
 
 /**
@@ -377,10 +386,12 @@ function SITE_mondayResolveColumnId_(boardId, titleOrId) {
   if (!titleOrId) return '';
   const looksId = /^[a-z0-9_]+$/i.test(titleOrId) && !Utils_normHeader(titleOrId).includes(' ');
   if (looksId) return titleOrId;
+
   const want = Utils_normHeader(titleOrId);
-  const q = `query($bid:[ID!]){ boards(ids:$bid){ columns{ id title type } } }`;
-  const d = Utils_mondayGraphQL(q, { bid: [Number(boardId)] });
-  const cols = (d && d.boards && d.boards[0] && d.boards[0].columns) || [];
+
+  // ✅ OPTIMISATION: Utilise le cache Monday au lieu d'appeler l'API à chaque fois
+  const cols = CacheManager.getMondayBoardColumns(boardId);
+
   let best = '';
   for (const c of cols) { if (Utils_normHeader(c.title) === want) { best = c.id; break; } }
   if (!best) { for (const c of cols) { if (Utils_normHeader(c.title).includes(want)) { best = c.id; break; } } }
@@ -408,7 +419,10 @@ function SITE_mondayFormCountsByMonth_(boardId, colTitleOrId, fromUTC, toUTC) {
           }
         }
       }`;
-    const d = Utils_mondayGraphQL(q, { bid: [Number(boardId)], cursor, col: [colId] });
+    // ✅ OPTIMISATION: Rate limiting Monday
+    const d = RateLimiter.throttle('monday', () =>
+      Utils_mondayGraphQL(q, { bid: [Number(boardId)], cursor, col: [colId] })
+    );
     const page = d && d.boards && d.boards[0] && d.boards[0].items_page;
     if (!page) break;
     (page.items || []).forEach(it => {
