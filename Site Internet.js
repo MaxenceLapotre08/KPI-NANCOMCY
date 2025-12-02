@@ -806,7 +806,8 @@ function run_Site_FullHistory() {
     if (!cols.mois) throw new Error("Colonne 'Mois' introuvable (ligne d'entêtes).");
 
     const today = new Date();
-    const start = new Date(today.getFullYear(), today.getMonth() - SITE_MONTHS_BACK, 1);
+    // Début au 1er janvier 2024
+    const start = new Date(2024, 0, 1);
     const end = new Date(today.getFullYear(), today.getMonth(), 0);
 
     Validators.validateDateRange(start, end, 'run_Site_FullHistory');
@@ -838,6 +839,7 @@ function run_Site_FullHistory() {
         SITE_MONDAY_LEADS_BOARD_ID,
         SITE_MONDAY_LEADS_COL_SOURCE,
         SITE_MONDAY_LEADS_COL_TYPE,
+        SITE_MONDAY_LEADS_COL_STATUS,
         new Date(Date.UTC(start.getFullYear(), start.getMonth(), 1)),
         new Date(Date.UTC(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59))
       ),
@@ -867,6 +869,9 @@ function run_Site_FullHistory() {
       const monthDate = new Date(parseInt(ym.slice(0, 4)), parseInt(ym.slice(5, 7)) - 1, 1);
       const useMatomo = monthDate >= matomoCutoffDate;
 
+      const t1 = new Date();
+      Logger.log(`[PERF] Début construction values pour ${ym}: ${t1.toISOString()}`);
+
       const values = {
         // Utilise Matomo pour les sessions si la date est >= Nov 2025, sinon GA4
         sessions: useMatomo ? (matomoVisits[ym]?.sessions ?? null) : (ga[ym]?.sessions ?? null),
@@ -879,7 +884,14 @@ function run_Site_FullHistory() {
         leadForms: leadFormsByMonth[ym] ?? null,
         bounce: useMatomo ? (matomoVisits[ym]?.bouncePct ?? null) : (ga[ym]?.bouncePct ?? null)
       };
+
+      const t2 = new Date();
+      Logger.log(`[PERF] Fin construction values (${t2 - t1}ms). Début SITE_writeMonthRow_: ${t2.toISOString()}`);
+
       SITE_writeMonthRow_(sh, cols, ym, values);
+
+      const t3 = new Date();
+      Logger.log(`[PERF] Fin SITE_writeMonthRow_ (${t3 - t2}ms)`);
     });
 
   }, 'run_Site_FullHistory', { rethrow: true });
