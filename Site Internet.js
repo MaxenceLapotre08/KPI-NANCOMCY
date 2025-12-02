@@ -170,10 +170,10 @@ function SITE_matomoFetchVisitsMonthly_(startDate, endDate) {
 
 /**
  * Transforme la réponse Matomo en format compatible avec le reste du code.
- * Matomo retourne: { "2025-11": { nb_visits: 123, nb_actions: 456, ... } }
- * On transforme en: { "2025-11": { sessions: 123 } }
+ * Matomo retourne: { "2025-11": { nb_visits: 123, avg_time_on_site: 174, bounce_rate: "22 %", ... } }
+ * On transforme en: { "2025-11": { sessions: 123, avgSec: 174, bouncePct: 0.22 } }
  * @param {object} matomoResp - Réponse brute de l'API Matomo
- * @returns {object} Objet avec format { "YYYY-MM": { sessions: number } }
+ * @returns {object} Objet avec format { "YYYY-MM": { sessions, avgSec, bouncePct } }
  */
 function SITE_parseMatomoVisitsResponse_(matomoResp) {
   if (!matomoResp || typeof matomoResp !== 'object') {
@@ -192,11 +192,20 @@ function SITE_parseMatomoVisitsResponse_(matomoResp) {
       continue;
     }
 
-    // Extraire nb_visits et le mapper à "sessions"
+    // Extraire les métriques Matomo
     if (data && typeof data === 'object') {
       const sessions = Number(data.nb_visits || 0);
-      result[monthKey] = { sessions };
-      Logger.log(`[Matomo Parse] ${monthKey}: ${sessions} visites`);
+      const avgSec = Number(data.avg_time_on_site || 0);
+
+      // bounce_rate est une string "22 %" → convertir en 0.22
+      let bouncePct = 0;
+      if (data.bounce_rate) {
+        const bounceStr = String(data.bounce_rate).replace(/[^0-9.]/g, ''); // Enlever "%" et espaces
+        bouncePct = Number(bounceStr) / 100;
+      }
+
+      result[monthKey] = { sessions, avgSec, bouncePct };
+      Logger.log(`[Matomo Parse] ${monthKey}: ${sessions} visites, ${avgSec}s moyenne, ${(bouncePct * 100).toFixed(1)}% rebond`);
     }
   }
 
@@ -861,13 +870,14 @@ function run_Site_FullHistory() {
       const values = {
         // Utilise Matomo pour les sessions si la date est >= Nov 2025, sinon GA4
         sessions: useMatomo ? (matomoVisits[ym]?.sessions ?? null) : (ga[ym]?.sessions ?? null),
-        avgSec: ga[ym]?.avgSec ?? null,
+        // Si Matomo (>= nov 2025), utiliser Matomo pour avgSec et bounce, sinon GA4
+        avgSec: useMatomo ? (matomoVisits[ym]?.avgSec ?? null) : (ga[ym]?.avgSec ?? null),
         impressions: gsc[ym]?.impressions ?? null,
         calls: callsByMonth[ym] ?? null,
         forms: formsByMonth[ym] ?? null,
         leadCalls: leadCallsByMonth[ym] ?? null,
         leadForms: leadFormsByMonth[ym] ?? null,
-        bounce: ga[ym]?.bouncePct ?? null
+        bounce: useMatomo ? (matomoVisits[ym]?.bouncePct ?? null) : (ga[ym]?.bouncePct ?? null)
       };
       SITE_writeMonthRow_(sh, cols, ym, values);
     });
@@ -940,13 +950,14 @@ function run_Site_AddLastMonth() {
 
   const values = {
     sessions: sessionsData[ymKey]?.sessions ?? null,
-    avgSec: gaForDuration[ymKey]?.avgSec ?? null,
+    // Si Matomo (>= nov 2025), utiliser Matomo pour avgSec et bounce, sinon GA4
+    avgSec: useMatomo ? (sessionsData[ymKey]?.avgSec ?? null) : (gaForDuration[ymKey]?.avgSec ?? null),
     impressions: gsc[ymKey]?.impressions ?? null,
     calls: callsByMonth[ymKey] ?? null,
     forms: formsByMonth[ymKey] ?? null,
     leadCalls: leadCallsByMonth[ymKey] ?? null,
     leadForms: leadFormsByMonth[ymKey] ?? null,
-    bounce: gaForDuration[ymKey]?.bouncePct ?? null
+    bounce: useMatomo ? (sessionsData[ymKey]?.bouncePct ?? null) : (gaForDuration[ymKey]?.bouncePct ?? null)
   };
 
   const t2 = new Date();
@@ -1310,13 +1321,14 @@ function run_Site_CurrentMonth() {
 
   const values = {
     sessions: sessionsData[ymKey]?.sessions ?? null,
-    avgSec: gaForOtherMetrics[ymKey]?.avgSec ?? null,
+    // Si Matomo (>= nov 2025), utiliser Matomo pour avgSec et bounce, sinon GA4
+    avgSec: useMatomo ? (sessionsData[ymKey]?.avgSec ?? null) : (gaForOtherMetrics[ymKey]?.avgSec ?? null),
     impressions: gsc[ymKey]?.impressions ?? null,
     calls: callsByMonth[ymKey] ?? null,
     forms: formsByMonth[ymKey] ?? null,
     leadCalls: leadCallsByMonth[ymKey] ?? null,
     leadForms: leadFormsByMonth[ymKey] ?? null,
-    bounce: gaForOtherMetrics[ymKey]?.bouncePct ?? null
+    bounce: useMatomo ? (sessionsData[ymKey]?.bouncePct ?? null) : (gaForOtherMetrics[ymKey]?.bouncePct ?? null)
   };
 
   const t2 = new Date();
