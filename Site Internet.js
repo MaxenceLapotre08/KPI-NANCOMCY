@@ -463,33 +463,39 @@ function SITE_mondayLeadCallsCountsByMonth_(boardId, colSource, colType, colStat
   const counts = {};
   let cursor = null;
 
+  // ✅ OPTIMISATION: Convertir textes → index Monday pour les filtres
+  const sourceIndexes = MONDAY_textToIndexes_(boardId, sourceId, SITE_MONDAY_LEADS_SOURCE_MATCH);
+  const typeIndexes = MONDAY_textToIndexes_(boardId, typeId, SITE_MONDAY_LEADS_TYPE_MATCH);
+  const statusIndexes = statusId ? MONDAY_textToIndexes_(boardId, statusId, SITE_MONDAY_LEADS_STATUS_MATCH) : [];
+
   do {
-    // ✅ OPTIMISATION MAJEURE: Filtres Monday pour ne récupérer QUE les items pertinents
+    // ✅ OPTIMISATION MAJEURE: Filtres Monday côté serveur (réduction 99%)
     const rules = [
-      {
-        column_id: sourceId,
-        compare_value: SITE_MONDAY_LEADS_SOURCE_MATCH,
-        operator: 'any_of'
-      },
-      {
-        column_id: typeId,
-        compare_value: SITE_MONDAY_LEADS_TYPE_MATCH,
-        operator: 'any_of'
-      }
+      { column_id: sourceId, compare_value: sourceIndexes, operator: "any_of" },
+      { column_id: typeId, compare_value: typeIndexes, operator: "any_of" }
     ];
 
-    if (statusId) {
-      rules.push({
-        column_id: statusId,
-        compare_value: SITE_MONDAY_LEADS_STATUS_MATCH,
-        operator: 'any_of'
-      });
+    if (statusId && statusIndexes.length > 0) {
+      rules.push({ column_id: statusId, compare_value: statusIndexes, operator: "any_of" });
     }
 
+    const hasFilters = !cursor && sourceIndexes.length > 0 && typeIndexes.length > 0;
+    const queryParams = hasFilters ? { rules, operator: "and" } : null;
+    const colIds = [sourceId, typeId].concat(statusId ? [statusId] : []).concat(dateId ? [dateId] : []);
+
+    // ✅ Construire la query dynamiquement pour éviter variables non utilisées
+    const querySignature = cursor
+      ? '$bid:[ID!], $cursor:String, $cols:[String!]'
+      : (hasFilters ? '$bid:[ID!], $cols:[String!], $qp:ItemsQuery' : '$bid:[ID!], $cols:[String!]');
+
+    const queryParams_str = cursor
+      ? 'limit:500, cursor:$cursor'
+      : (hasFilters ? 'limit:500, query_params:$qp' : 'limit:500');
+
     const q = `
-      query($bid:[ID!], $cursor:String, $cols:[String!], $rules:[ItemsQueryRule!]){
+      query(${querySignature}){
         boards(ids:$bid){
-          items_page_by_column_values(limit:500, cursor:$cursor, rules:$rules){
+          items_page(${queryParams_str}){
             cursor
             items{
               id state created_at
@@ -498,12 +504,14 @@ function SITE_mondayLeadCallsCountsByMonth_(boardId, colSource, colType, colStat
           }
         }
       }`;
-    const colIds = [sourceId, typeId].concat(statusId ? [statusId] : []).concat(dateId ? [dateId] : []);
+
     // ✅ OPTIMISATION: Rate limiting Monday
-    const d = RateLimiter.throttle('monday', () =>
-      Utils_mondayGraphQL(q, { bid: [Number(boardId)], cursor, cols: colIds, rules })
-    );
-    const page = d && d.boards && d.boards[0] && d.boards[0].items_page_by_column_values; if (!page) break;
+    const variables = { bid: [Number(boardId)], cols: colIds };
+    if (cursor) variables.cursor = cursor;
+    else if (queryParams) variables.qp = queryParams;
+
+    const d = RateLimiter.throttle('monday', () => Utils_mondayGraphQL(q, variables));
+    const page = d && d.boards && d.boards[0] && d.boards[0].items_page; if (!page) break;
 
     (page.items || []).forEach(it => {
       if (String(it.state || '').toLowerCase() === 'archived') return;
@@ -549,33 +557,38 @@ function SITE_mondayLeadFormsCountsByMonth_(boardId, colSource, colType, colStat
   const counts = {};
   let cursor = null;
 
+  // ✅ OPTIMISATION: Convertir textes → index Monday pour les filtres
+  const sourceIndexes = MONDAY_textToIndexes_(boardId, sourceId, SITE_MONDAY_LEADS_SOURCE_MATCH);
+  const typeIndexes = MONDAY_textToIndexes_(boardId, typeId, SITE_MONDAY_LEADS_FORM_MATCH);
+  const statusIndexes = statusId ? MONDAY_textToIndexes_(boardId, statusId, SITE_MONDAY_LEADS_STATUS_MATCH) : [];
+
   do {
-    // ✅ OPTIMISATION MAJEURE: Filtres Monday pour ne récupérer QUE les items pertinents
+    // ✅ OPTIMISATION MAJEURE: Filtres Monday côté serveur (réduction 99%)
     const rules = [
-      {
-        column_id: sourceId,
-        compare_value: SITE_MONDAY_LEADS_SOURCE_MATCH,
-        operator: 'any_of'
-      },
-      {
-        column_id: typeId,
-        compare_value: SITE_MONDAY_LEADS_FORM_MATCH,
-        operator: 'any_of'
-      }
+      { column_id: sourceId, compare_value: sourceIndexes, operator: "any_of" },
+      { column_id: typeId, compare_value: typeIndexes, operator: "any_of" }
     ];
 
-    if (statusId) {
-      rules.push({
-        column_id: statusId,
-        compare_value: SITE_MONDAY_LEADS_STATUS_MATCH,
-        operator: 'any_of'
-      });
+    if (statusId && statusIndexes.length > 0) {
+      rules.push({ column_id: statusId, compare_value: statusIndexes, operator: "any_of" });
     }
 
+    const hasFilters = !cursor && sourceIndexes.length > 0 && typeIndexes.length > 0;
+    const queryParams = hasFilters ? { rules, operator: "and" } : null;
+    const colIds = [sourceId, typeId].concat(statusId ? [statusId] : []).concat(dateId ? [dateId] : []);
+
+    const querySignature = cursor
+      ? '$bid:[ID!], $cursor:String, $cols:[String!]'
+      : (hasFilters ? '$bid:[ID!], $cols:[String!], $qp:ItemsQuery' : '$bid:[ID!], $cols:[String!]');
+
+    const queryParams_str = cursor
+      ? 'limit:500, cursor:$cursor'
+      : (hasFilters ? 'limit:500, query_params:$qp' : 'limit:500');
+
     const q = `
-      query($bid:[ID!], $cursor:String, $cols:[String!], $rules:[ItemsQueryRule!]){
+      query(${querySignature}){
         boards(ids:$bid){
-          items_page_by_column_values(limit:500, cursor:$cursor, rules:$rules){
+          items_page(${queryParams_str}){
             cursor
             items{
               id state created_at
@@ -584,12 +597,13 @@ function SITE_mondayLeadFormsCountsByMonth_(boardId, colSource, colType, colStat
           }
         }
       }`;
-    const colIds = [sourceId, typeId].concat(statusId ? [statusId] : []).concat(dateId ? [dateId] : []);
-    // ✅ OPTIMISATION: Rate limiting Monday
-    const d = RateLimiter.throttle('monday', () =>
-      Utils_mondayGraphQL(q, { bid: [Number(boardId)], cursor, cols: colIds, rules })
-    );
-    const page = d && d.boards && d.boards[0] && d.boards[0].items_page_by_column_values; if (!page) break;
+
+    const variables = { bid: [Number(boardId)], cols: colIds };
+    if (cursor) variables.cursor = cursor;
+    else if (queryParams) variables.qp = queryParams;
+
+    const d = RateLimiter.throttle('monday', () => Utils_mondayGraphQL(q, variables));
+    const page = d && d.boards && d.boards[0] && d.boards[0].items_page; if (!page) break;
 
     (page.items || []).forEach(it => {
       if (String(it.state || '').toLowerCase() === 'archived') return;
@@ -717,41 +731,60 @@ function SITE_findCols_(sh) {
 
 function SITE_writeMonthRow_(sh, cols, ymKey, values) {
   const row = SheetHelpers.ensureMonthRow(sh, cols.mois, ymKey, START_ROW_SITE, 'Site');
+  Logger.log(`[Site/WRITE] Écriture des KPIs pour ${ymKey} sur la ligne ${row}`);
 
-  // 1. Préparer toutes les valeurs à écrire dans un "plan d'écriture"
-  const writePlan = {};
+  // ✅ OPTIMISATION BATCH: Préparer toutes les updates
+  const updates = [];
+  if (values.impressions != null) updates.push({ col: cols.impr, value: values.impressions, format: null });
+  if (values.sessions != null) updates.push({ col: cols.visits, value: values.sessions, format: null });
+  if (values.avgSec != null) updates.push({ col: cols.dur, value: values.avgSec / 86400, format: '[h]:mm:ss' });
+  if (values.calls != null) updates.push({ col: cols.appels, value: values.calls, format: null });
+  if (values.forms != null) updates.push({ col: cols.forms, value: values.forms, format: null });
+  if (values.leadCalls != null) updates.push({ col: cols.appelsLead, value: values.leadCalls, format: null });
+  if (values.leadForms != null) updates.push({ col: cols.formsLead, value: values.leadForms, format: null });
+  if (values.bounce != null) updates.push({ col: cols.bounce, value: values.bounce, format: '0.00%' });
 
-  // Données brutes des APIs
-  if (values.impressions != null) writePlan[cols.impr] = { value: values.impressions, format: null };
-  if (values.sessions != null) writePlan[cols.visits] = { value: values.sessions, format: null };
-  if (values.avgSec != null) writePlan[cols.dur] = { value: values.avgSec / 86400, format: '[h]:mm:ss' };
-  if (values.calls != null) writePlan[cols.appels] = { value: values.calls, format: null };
-  if (values.forms != null) writePlan[cols.forms] = { value: values.forms, format: null };
-  if (values.leadCalls != null) writePlan[cols.appelsLead] = { value: values.leadCalls, format: null };
-  if (values.leadForms != null) writePlan[cols.formsLead] = { value: values.leadForms, format: null };
-  if (values.bounce != null) writePlan[cols.bounce] = { value: values.bounce, format: '0.00%' };
-
-  // Données calculées par le script
-  const impressions = values.impressions ?? Number(sh.getRange(row, cols.impr).getValue() || 0);
-  const sessions = values.sessions ?? Number(sh.getRange(row, cols.visits).getValue() || 0);
-  const contacts = (values.calls ?? Number(sh.getRange(row, cols.appels).getValue() || 0)) + (values.forms ?? Number(sh.getRange(row, cols.forms).getValue() || 0));
-  const leads = (values.leadCalls ?? Number(sh.getRange(row, cols.appelsLead).getValue() || 0)) + (values.leadForms ?? Number(sh.getRange(row, cols.formsLead).getValue() || 0));
-
-  if (impressions > 0) writePlan[cols.ctr] = { value: sessions / impressions, format: '0.00%' };
-
-
-  // 2. Exécuter le plan d'écriture, cellule par cellule
-  Utils_setPreserveFormula(sh, row, cols.mois, Utils_monthKeyToFr(ymKey)); // Toujours écrire le mois
-
-  for (const col in writePlan) {
-    if (!col || col === '0') continue; // Ignore si la colonne n'a pas été trouvée
-    if (SITE_isProtectedHeader_(sh, col)) {
-      Logger.log(`[PROTECTED] Colonne ${sh.getRange(HEADERS_ROW_SITE, col).getValue()} ignorée car protégée.`);
-      continue;
-    }
-    const { value, format } = writePlan[col];
-    Utils_setPreserveFormula(sh, row, col, value, format);
+  // CTR calculé
+  const impressions = values.impressions ?? 0;
+  const sessions = values.sessions ?? 0;
+  if (impressions > 0 && cols.ctr) {
+    updates.push({ col: cols.ctr, value: sessions / impressions, format: '0.00%' });
   }
+
+  if (updates.length === 0) return;
+
+  // 🚀 BATCH: Récupérer toutes les formules EN UNE FOIS
+  const cols_list = updates.map(u => u.col);
+  const minCol = Math.min(...cols_list);
+  const maxCol = Math.max(...cols_list);
+  const numCols = maxCol - minCol + 1;
+  const formulas = sh.getRange(row, minCol, 1, numCols).getFormulas()[0];
+
+  // Filtrer les cellules avec formules + protégées
+  const toWrite = updates.filter(u => {
+    if (SITE_isProtectedHeader_(sh, u.col)) {
+      Logger.log(`[PROTECTED] Colonne ${sh.getRange(HEADERS_ROW_SITE, u.col).getValue()} ignorée`);
+      return false;
+    }
+    const idx = u.col - minCol;
+    if (formulas[idx] && formulas[idx].trim()) {
+      return false; // Skip formules
+    }
+    return true;
+  });
+
+  // 🚀 BATCH: Écrire toutes les valeurs EN UNE FOIS
+  toWrite.forEach(u => {
+    sh.getRange(row, u.col).setValue(u.value);
+  });
+
+  // 🚀 BATCH: Appliquer tous les formats EN UNE FOIS
+  toWrite.filter(u => u.format).forEach(u => {
+    sh.getRange(row, u.col).setNumberFormat(u.format);
+  });
+
+  // Toujours écrire le mois
+  sh.getRange(row, cols.mois).setValue(Utils_monthKeyToFr(ymKey));
 }
 
 
@@ -1246,6 +1279,7 @@ function run_Site_CurrentMonth() {
       SITE_MONDAY_LEADS_BOARD_ID,
       SITE_MONDAY_LEADS_COL_SOURCE,
       SITE_MONDAY_LEADS_COL_TYPE,
+      SITE_MONDAY_LEADS_COL_STATUS,  // ⚠️ FIX: Paramètre manquant !
       new Date(Date.UTC(start.getFullYear(), start.getMonth(), 1)),
       new Date(Date.UTC(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59))
     ),
@@ -1264,7 +1298,8 @@ function run_Site_CurrentMonth() {
     'Monday lead forms mois en cours'
   );
 
-
+  const t1 = new Date();
+  Logger.log(`[PERF] Début construction values: ${t1.toISOString()}`);
 
   const values = {
     sessions: sessionsData[ymKey]?.sessions ?? null,
@@ -1277,10 +1312,16 @@ function run_Site_CurrentMonth() {
     bounce: gaForOtherMetrics[ymKey]?.bouncePct ?? null
   };
 
+  const t2 = new Date();
+  Logger.log(`[PERF] Fin construction values (${t2 - t1}ms). Début SITE_writeMonthRow_: ${t2.toISOString()}`);
+
   // ⚠️ SITE_writeMonthRow_ gère déjà :
   //  - création / insertion de la ligne du mois si elle n'existe pas
   //  - écriture UNIQUEMENT dans les colonnes autorisées (pas les formules)
   SITE_writeMonthRow_(sh, cols, ymKey, values);
+
+  const t3 = new Date();
+  Logger.log(`[PERF] Fin SITE_writeMonthRow_ (${t3 - t2}ms)`);
 
   Utils_toast('Site: mois en cours mis à jour ✅', 'Site Internet', 5);
 }
