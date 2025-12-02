@@ -773,34 +773,13 @@ function SITE_writeMonthRow_(sh, cols, ymKey, values) {
     return true;
   });
 
-  // OPTIMISATION VRAI BATCH: Lire toute la ligne EN UNE FOIS
-  const lastCol = sh.getLastColumn();
-  const rowRange = sh.getRange(row, 1, 1, lastCol);
-  const currentValues = rowRange.getValues()[0];
-
-  // PrÃ©parer les nouvelles valeurs en mÃ©moire (copie du tableau actuel)
-  const newValues = [...currentValues];
-
-  // Appliquer toutes les modifications en mÃ©moire
+  // Ã‰crire chaque valeur individuellement en prÃ©servant les formules
   toWrite.forEach(u => {
-    const colIndex = u.col - 1; // Convert to 0-indexed
-    newValues[colIndex] = u.value;
+    Utils_setPreserveFormula(sh, row, u.col, u.value, u.format);
   });
 
   // Toujours Ã©crire le mois
-  newValues[cols.mois - 1] = Utils_monthKeyToFr(ymKey);
-
-  // VRAI BATCH: Ã‰crire toute la ligne EN UNE SEULE OPÃ‰RATION
-  Logger.log(`[Site/WRITE] Écriture des KPIs pour ${ymKey} sur la ligne ${row}`);
-  rowRange.setValues([newValues]);
-
-  // Appliquer les formats seulement pour les colonnes modifiÃ©es
-  const formatsToApply = toWrite.filter(u => u.format);
-  if (formatsToApply.length > 0) {
-    formatsToApply.forEach(f => {
-      sh.getRange(row, f.col).setNumberFormat(f.format);
-    });
-  }
+  sh.getRange(row, cols.mois).setValue(Utils_monthKeyToFr(ymKey));
 }
 
 
@@ -1353,3 +1332,4 @@ function run_Site_CurrentMonth() {
 
   Utils_toast('Site: mois en cours mis à jour ✅', 'Site Internet', 5);
 }
+
