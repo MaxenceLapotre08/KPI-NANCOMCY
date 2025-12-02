@@ -1,4 +1,4 @@
-/****************************** CONFIG FEUILLE ******************************/
+﻿/****************************** CONFIG FEUILLE ******************************/
 const SHEET_NAME_SITE = 'Site Internet';
 const HEADERS_ROW_SITE = 3;
 const START_ROW_SITE = 6;
@@ -773,18 +773,34 @@ function SITE_writeMonthRow_(sh, cols, ymKey, values) {
     return true;
   });
 
-  // 🚀 BATCH: Écrire toutes les valeurs EN UNE FOIS
+  // OPTIMISATION VRAI BATCH: Lire toute la ligne EN UNE FOIS
+  const lastCol = sh.getLastColumn();
+  const rowRange = sh.getRange(row, 1, 1, lastCol);
+  const currentValues = rowRange.getValues()[0];
+
+  // PrÃ©parer les nouvelles valeurs en mÃ©moire (copie du tableau actuel)
+  const newValues = [...currentValues];
+
+  // Appliquer toutes les modifications en mÃ©moire
   toWrite.forEach(u => {
-    sh.getRange(row, u.col).setValue(u.value);
+    const colIndex = u.col - 1; // Convert to 0-indexed
+    newValues[colIndex] = u.value;
   });
 
-  // 🚀 BATCH: Appliquer tous les formats EN UNE FOIS
-  toWrite.filter(u => u.format).forEach(u => {
-    sh.getRange(row, u.col).setNumberFormat(u.format);
-  });
+  // Toujours Ã©crire le mois
+  newValues[cols.mois - 1] = Utils_monthKeyToFr(ymKey);
 
-  // Toujours écrire le mois
-  sh.getRange(row, cols.mois).setValue(Utils_monthKeyToFr(ymKey));
+  // VRAI BATCH: Ã‰crire toute la ligne EN UNE SEULE OPÃ‰RATION
+  Logger.log(`[Site/WRITE] Écriture des KPIs pour ${ymKey} sur la ligne ${row}`);
+  rowRange.setValues([newValues]);
+
+  // Appliquer les formats seulement pour les colonnes modifiÃ©es
+  const formatsToApply = toWrite.filter(u => u.format);
+  if (formatsToApply.length > 0) {
+    formatsToApply.forEach(f => {
+      sh.getRange(row, f.col).setNumberFormat(f.format);
+    });
+  }
 }
 
 
@@ -919,6 +935,7 @@ function run_Site_AddLastMonth() {
       SITE_MONDAY_LEADS_BOARD_ID,
       SITE_MONDAY_LEADS_COL_SOURCE,
       SITE_MONDAY_LEADS_COL_TYPE,
+      SITE_MONDAY_LEADS_COL_STATUS,
       new Date(Date.UTC(start.getFullYear(), start.getMonth(), 1)),
       new Date(Date.UTC(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59))
     ),
@@ -939,16 +956,27 @@ function run_Site_AddLastMonth() {
 
 
 
+  const t1 = new Date();
+  Logger.log(`[PERF] Début construction values: ${t1.toISOString()}`);
+
   const values = {
     sessions: sessionsData[ymKey]?.sessions ?? null,
     avgSec: gaForDuration[ymKey]?.avgSec ?? null,
     impressions: gsc[ymKey]?.impressions ?? null,
     calls: callsByMonth[ymKey] ?? null,
     forms: formsByMonth[ymKey] ?? null,
+    leadCalls: leadCallsByMonth[ymKey] ?? null,
     leadForms: leadFormsByMonth[ymKey] ?? null,
     bounce: gaForDuration[ymKey]?.bouncePct ?? null
   };
+
+  const t2 = new Date();
+  Logger.log(`[PERF] Fin construction values (${t2 - t1}ms). Début SITE_writeMonthRow_: ${t2.toISOString()}`);
+
   SITE_writeMonthRow_(sh, cols, ymKey, values);
+
+  const t3 = new Date();
+  Logger.log(`[PERF] Fin SITE_writeMonthRow_ (${t3 - t2}ms)`);
 
   Utils_toast('Site: N-1 mis à jour ✅', 'Site Internet', 5);
 }

@@ -86,12 +86,12 @@ const SheetHelpers = {
             Logger.log(`[${logPrefix}/INFO] Changement d'année détecté (${lastYear} -> ${targetYear}). Ajout d'un séparateur.`);
             sheet.getRange(targetRow, moisCol).setValue(String(targetYear));
             this.styleYearRow(sheet, targetRow, moisCol);
-            Logger.log(`[${logPrefix}/WRITE] Écriture des KPIs pour ${targetYM} sur la nouvelle ligne ${targetRow + 1}`);
+            Logger.log(`[${logPrefix}/WRITE] Écriture des KPIs pour ${targetYM} sur la ligne existante ${targetRow + 1} (en dessous du séparateur)`);
             return targetRow + 1;
         }
 
         // 4. Cas normal : écriture sur la ligne suivante
-        Logger.log(`[${logPrefix}/WRITE] Écriture des KPIs pour ${targetYM} sur la nouvelle ligne ${targetRow}`);
+        Logger.log(`[${logPrefix}/WRITE] Écriture des KPIs pour ${targetYM} sur la ligne existante ${targetRow} (ligne vide en dessous du dernier mois)`);
         return targetRow;
     },
 
